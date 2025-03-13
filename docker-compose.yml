@@ -1,0 +1,97 @@
+version: "3.8"
+
+services:
+  # Speech-to-Text (STT) Service
+  stt:
+    image: sst_image
+    container_name: stt_service
+    build:
+      context: ./stt
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./stt/models:/app/models
+    networks:
+      - elderly_care_network
+    environment:
+      - STT_MODEL_PATH=/app/models/vosk-model-en
+    command: python stt_server.py
+
+  # Text-to-Speech (TTS) Service
+  tts:
+    image: tts_image
+    container_name: tts_service
+    build:
+      context: ./tts
+      dockerfile: Dockerfile
+    ports:
+      - "5003:5003" # Expose TTS service port
+    volumes:
+      - ./tts/models:/app/models
+    networks:
+      - elderly_care_network
+    environment:
+      - TTS_MODEL_PATH=/app/models/coqui-tts
+    command: python tts_server.py
+
+  # Large Language Model (LLM) Service
+  llm:
+    image: llm_image
+    container_name: llm_service
+    build:
+      context: ./llm
+      dockerfile: Dockerfile
+    ports:
+      - "5002:5002"
+    networks:
+      - elderly_care_network
+    environment:
+      - OLLAMA_URL=http://ollama:11434/api/generate
+    command: python llm_server.py
+
+  # Ollama Service
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_service
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama/models:/root/.ollama
+    networks:
+      - elderly_care_network
+
+  # Database Service (PostgreSQL)
+  database:
+    image: postgres:latest
+    container_name: elderly_care_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/data:/var/lib/postgresql/data
+    networks:
+      - elderly_care_network
+    environment:
+      POSTGRES_USER: elderly_user
+      POSTGRES_PASSWORD: securepassword
+      POSTGRES_DB: elderly_care_db
+
+  # Matrix Protocol Service (Synapse)
+  matrix:
+    image: matrixdotorg/synapse:latest
+    container_name: matrix_server
+    ports:
+      - "8008:8008"
+    volumes:
+      - ./matrix/data:/data
+    networks:
+      - elderly_care_network
+    environment:
+      SYNAPSE_SERVER_NAME: yourdomain.com
+      SYNAPSE_REPORT_STATS: "no"
+    command: start
+
+# Docker Network
+networks:
+  elderly_care_network:
+    driver: bridge
