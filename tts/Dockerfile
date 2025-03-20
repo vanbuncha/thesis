@@ -1,57 +1,32 @@
-# TTS Dockerfile
-FROM python:3.9-slim
+FROM --platform=linux/arm64 python:3.10-slim
 
-# Set environment variables to prevent interactive prompts during installation
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    CARGO_HOME=/root/.cargo
+WORKDIR /app
 
-# Install system dependencies
+# Install required system dependencies
 RUN apt-get update && apt-get install -y \
+    espeak \
+    ffmpeg \
+    gcc \
+    g++ \
     build-essential \
-    python3-dev \
-    python3-pip \
-    python3-venv \
-    libffi-dev \
-    libssl-dev \
-    libblas-dev \
-    liblapack-dev \
-    gfortran \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install required Python dependencies
-RUN pip install --upgrade pip setuptools wheel
-
-# Install Rust (latest stable version)
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+# Install the latest rust and pip
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Verify Rust installation
-RUN rustc --version && cargo --version
+RUN pip install --upgrade pip
 
-# Install setuptools-rust (fixes sudachipy build issue)
-RUN pip install setuptools-rust
+# Copy Python dependency file
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Cython (specific version to avoid compatibility issues)
-RUN pip install "Cython<3.0"
+# Copy the application code
+COPY . .
 
-# Install spaCy separately to avoid compilation errors
-RUN pip install "spacy<3.6" numpy
+# Expose port 5003 for the TTS service
+EXPOSE 5003
 
-# Install TTS and Flask with no build isolation
-RUN pip install TTS flask --no-build-isolation
-
-# Set the working directory
-WORKDIR /app
-
-# Copy application files
-COPY . /app
-
-# Expose the necessary port
-EXPOSE 5000
-
-# Define the entry point
-CMD ["python", "app.py"]
+CMD ["python3", "tts_server.py"]
 
