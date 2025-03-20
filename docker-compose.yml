@@ -1,4 +1,4 @@
-version: "3.8"
+# version: "3.8"
 
 services:
   # Speech-to-Text (STT) Service
@@ -20,20 +20,19 @@ services:
 
   # Text-to-Speech (TTS) Service
   tts:
-    image: tts_image
-    container_name: tts_service
     build:
       context: ./tts
       dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    image: tts_image
     ports:
-      - "5003:5003" # Expose TTS service port
-    volumes:
-      - ./tts/models:/app/models
+      - "5003:5003"
     networks:
       - elderly_care_network
     environment:
       - TTS_MODEL_PATH=/app/models/coqui-tts
-    command: python tts_server.py
+    command: python3 tts_server.py
 
   # Large Language Model (LLM) Service
   llm:
@@ -57,7 +56,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ./ollama/models:/root/.ollama
+      - ollama_models:/root/.ollama # Use a named Docker volume
     networks:
       - elderly_care_network
 
@@ -95,3 +94,5 @@ services:
 networks:
   elderly_care_network:
     driver: bridge
+volumes:
+  ollama_models:

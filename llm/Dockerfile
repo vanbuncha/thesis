@@ -1,15 +1,17 @@
-# LLM Dockerfile
 FROM python:3.9-slim
 
-# Install dependencies
-RUN pip install transformers flask
-
-# Copy LLM code
-COPY . /app
 WORKDIR /app
 
-# Expose port
+# Copy requirements and install dependencies
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# Copy app files
+COPY . .
+
+# Expose port 5002
 EXPOSE 5002
 
-# Run LLM server
+# Run the Flask app
 CMD ["python", "llm_server.py"]
+
