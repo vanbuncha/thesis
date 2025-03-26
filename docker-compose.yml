@@ -9,7 +9,7 @@ services:
       context: ./stt
       dockerfile: Dockerfile
     ports:
-      - "5001:5001"
+      - "5002:5002"
     volumes:
       - ./stt/models:/app/models
     networks:
@@ -42,7 +42,7 @@ services:
       context: ./llm
       dockerfile: Dockerfile
     ports:
-      - "5002:5002"
+      - "5001:5001"
     networks:
       - elderly_care_network
     environment:
@@ -77,18 +77,17 @@ services:
 
   # Matrix Protocol Service (Synapse)
   matrix:
-    image: matrixdotorg/synapse:latest
-    container_name: matrix_server
+    build: ./matrix
+    depends_on:
+      - llm
+      - stt
+      - tts
+    env_file:
+      - .env
     ports:
-      - "8008:8008"
+      - "5004:5004"
     volumes:
-      - ./matrix/data:/data
-    networks:
-      - elderly_care_network
-    environment:
-      SYNAPSE_SERVER_NAME: yourdomain.com
-      SYNAPSE_REPORT_STATS: "no"
-    command: start
+      - ./matrix/store:/data/matrix-store
 
 # Docker Network
 networks:
