@@ -1,9 +1,11 @@
 import os
+from nio.responses import DownloadResponse
+import json
 import mimetypes
 import aiohttp
 import asyncio
 import tempfile
-from nio.events.room_events import RoomMessageText, RoomMessage
+from nio.events.room_events import RoomMessage
 from nio import (
     AsyncClient,
     LoginResponse,
@@ -15,7 +17,7 @@ from nio import (
 )
 from aiohttp import ClientSession
 from nio import AsyncClientConfig
-from nio.exceptions import OlmUnverifiedDeviceError, EncryptionError
+from nio.exceptions import EncryptionError
 
 # --- Configuration ---
 MATRIX_HOMESERVER = os.getenv("MATRIX_HOMESERVER", "https://matrix.org")
@@ -48,9 +50,11 @@ async def login():
     print("🔐 Attempting login...")
     resp = await client.login(MATRIX_PASSWORD)
     print("📡 Login response:", resp)
+    print(f"🪪 Access token: {client.access_token}")
 
     if isinstance(resp, LoginResponse):
         print("✅ Logged in as", MATRIX_USER)
+        client.access_token = resp.access_token
         await client.sync(full_state=True)
     else:
         print("❌ Login failed:", resp)
@@ -75,14 +79,18 @@ async def download_media(url: str, dest: str):
                 f.write(await resp.read())
 
 
-async def transcribe_audio(filepath):
-    async with ClientSession() as session:
-        with open(filepath, "rb") as f:
-            data = aiohttp.FormData()
-            data.add_field("file", f, filename="voice.ogg", content_type="audio/ogg")
-            async with session.post(STT_URL, data=data) as resp:
-                result = await resp.json()
-                return result.get("text", "")
+async def transcribe_audio(audio_file_path):
+    for _ in range(5):
+        try:
+            async with aiohttp.ClientSession() as session:
+                with open(audio_file_path, "rb") as f:
+                    data = {"audio": f}
+                    async with session.post(STT_URL, data=data) as resp:
+                        return await resp.text()
+        except aiohttp.ClientConnectorError:
+            print("❌ STT service not ready yet, retrying...")
+            await asyncio.sleep(2)
+    raise RuntimeError("Failed to connect to STT after several retries.")
 
 
 async def generate_response(prompt):
@@ -101,60 +109,91 @@ async def synthesize_speech(text, out_path):
 
 
 # --- Respond with audio ---
+
+
 async def send_audio_response(room_id, audio_path):
     mime_type, _ = mimetypes.guess_type(audio_path)
-    with open(audio_path, "rb") as f:
-        audio_data = f.read()
 
-    upload_response = await client.upload(
-        audio_data,
-        content_type=mime_type or "audio/wav",
-        filename="response.wav",
-    )
+    try:
+        with open(audio_path, "rb") as f:
+            upload_response, _ = await client.upload(
+                f,
+                content_type=mime_type or "audio/wav",
+                filename="response.wav",
+            )
 
-    if isinstance(upload_response, UploadResponse):
-        content = {
-            "body": "response.wav",
-            "msgtype": "m.audio",
-            "url": upload_response.content_uri,
-            "info": {
-                "mimetype": mime_type,
-                "size": len(audio_data),
-            },
-        }
-        await client.room_send(
-            room_id=room_id,
-            message_type="m.room.message",
-            content=content,
-            ignore_unverified_devices=True,
-        )
-        print("📤 Sent encrypted reply")
-    else:
-        print("❌ Upload failed:", upload_response)
+        if isinstance(upload_response, UploadResponse):
+            content = {
+                "body": "response.wav",
+                "msgtype": "m.audio",
+                "url": upload_response.content_uri,
+                "info": {
+                    "mimetype": mime_type,
+                    "size": os.path.getsize(audio_path),
+                },
+            }
+
+            await client.room_send(
+                room_id=room_id,
+                message_type="m.room.message",
+                content=content,
+                ignore_unverified_devices=True,
+            )
+            print("📤 Sent audio reply")
+        else:
+            print("❌ Upload failed:", upload_response)
+
+    except Exception as e:
+        print("❌ Upload error:", str(e))
 
 
 async def handle_voice_event(room, audio_event):
     mxc_url = audio_event.url
     if not mxc_url:
+        print("⚠️ No MXC URL found in event.")
         return
 
     print(f"🎙️ Voice message in {room.display_name}")
+    print(f"🔗 Raw MXC URL: {mxc_url}")
 
-    mxc = mxc_url.replace("mxc://", "")
-    url = f"{MATRIX_HOMESERVER}/_matrix/media/r0/download/{mxc}"
-    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_audio:
-        await download_media(url, tmp_audio.name)
-        print("🔊 Downloaded audio")
+    try:
+        # Attempt to download using authenticated matrix-nio client
+        response = await client.download(mxc_url)
+        if not isinstance(response, DownloadResponse):
+            print(f"❌ Matrix client download failed: {response}")
+            return
 
-        text = await transcribe_audio(tmp_audio.name)
-        print("📝 Transcribed:", text)
+        # Write audio to temporary file
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_audio:
+            tmp_audio.write(response.body)
+            tmp_audio.flush()
 
-        reply = await generate_response(text)
-        print("💬 LLM:", reply)
+            file_size = os.path.getsize(tmp_audio.name)
+            print(f"🔊 Downloaded audio ({file_size} bytes) → {tmp_audio.name}")
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as reply_audio:
-            await synthesize_speech(reply, reply_audio.name)
-            await send_audio_response(room.room_id, reply_audio.name)
+            if file_size < 1000:
+                print("⚠️ Downloaded audio file is too small, skipping.")
+                return
+
+            # Run STT → LLM → TTS flow
+            try:
+                text = await transcribe_audio(tmp_audio.name)
+                print("📝 Transcribed:", text)
+
+                reply = await generate_response(text)
+                print("💬 LLM:", reply)
+
+                with tempfile.NamedTemporaryFile(
+                    suffix=".wav", delete=False
+                ) as reply_audio:
+                    await synthesize_speech(reply, reply_audio.name)
+                    await send_audio_response(room.room_id, reply_audio.name)
+
+            except Exception as e:
+                print(f"❌ Failed to handle voice message: {e}")
+
+    except Exception as e:
+        print(f"❌ Unexpected error while downloading audio: {e}")
 
 
 # --- Main event handler ---
@@ -198,6 +237,9 @@ async def encrypted_message_callback(room, event):
 
 
 async def plain_audio_callback(room, event):
+    if event.sender == client.user:  # avoid replying to self
+        return
+
     if isinstance(event, RoomMessageAudio):
         print(f"🎧 Received plain audio message in {room.display_name}")
         await handle_voice_event(room, event)
@@ -224,4 +266,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

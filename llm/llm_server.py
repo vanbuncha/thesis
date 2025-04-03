@@ -11,8 +11,8 @@ logging.basicConfig(level=logging.DEBUG)
 OLLAMA_URL = "http://ollama:11434/api/generate"  # Ollama API
 
 
-@app.route("/llm", methods=["POST"])
-def generate_response():
+@app.route("/generate", methods=["POST"])
+def generate():
     try:
         # Log the raw incoming request data
         raw_data = request.data.decode("utf-8")
@@ -56,5 +56,4 @@ def generate_response():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002, debug=True)
-
+    app.run(host="0.0.0.0", port=5001, debug=True)

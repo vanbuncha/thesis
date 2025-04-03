@@ -12,6 +12,7 @@ WORKDIR /app
 # Install Python dependencies including matrix-nio[e2e]
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip
+RUN apt-get update && apt-get install -y ffmpeg
 RUN pip install --no-cache-dir "matrix-nio[e2e]" aiohttp
 RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p /data/matrix-store && chmod -R 777 /data

@@ -12,7 +12,7 @@ MODEL_NAME = "tts_models/en/ljspeech/tacotron2-DDC"
 tts = TTS(MODEL_NAME, gpu=use_gpu)
 
 
-@app.route("/tts", methods=["POST"])
+@app.route("/synthesize", methods=["POST"])
 def text_to_speech():
     try:
         data = request.json

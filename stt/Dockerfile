@@ -1,4 +1,3 @@
-# STT Dockerfile
 FROM python:3.9-slim
 
 # Install system dependencies
@@ -10,18 +9,25 @@ RUN apt-get update && apt-get install -y \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
+# Set workdir 
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt .
+
 # Install Python dependencies
 RUN pip install --upgrade pip
-RUN pip install vosk flask gunicorn  
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy STT code and model
-COPY . /app
-COPY models /app/models
+# Copy rest of the app 
+COPY . .
 
-WORKDIR /app
+# Install any extra dependencies
+RUN pip install vosk flask pydub
 
 # Expose port
 EXPOSE 5001
 
-# Run STT server with Gunicorn
+# Run STT server
 CMD ["gunicorn", "--bind", "0.0.0.0:5001", "stt_server:app"]
+

@@ -51,12 +51,12 @@ services:
 
   # Ollama Service
   ollama:
-    image: ollama/ollama:latest
-    container_name: ollama_service
+    image: ollama/ollama
+    container_name: ollama
+    volumes:
+      - ollama_data:/root/.ollama
     ports:
       - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama # Use a named Docker volume
     networks:
       - elderly_care_network
 
@@ -88,10 +88,12 @@ services:
       - "5004:5004"
     volumes:
       - ./matrix/store:/data/matrix-store
+    networks:
+      - elderly_care_network
 
 # Docker Network
 networks:
   elderly_care_network:
     driver: bridge
 volumes:
-  ollama_models:
+  ollama_data:
