@@ -1,11 +1,12 @@
 import os
-from nio.responses import DownloadResponse
+import re
 import json
 import mimetypes
 import aiohttp
 import asyncio
 import tempfile
-from nio.events.room_events import RoomMessage
+
+from aiohttp import ClientSession
 from nio import (
     AsyncClient,
     LoginResponse,
@@ -14,9 +15,10 @@ from nio import (
     RoomInviteError,
     UploadResponse,
     MegolmEvent,
+    AsyncClientConfig,
 )
-from aiohttp import ClientSession
-from nio import AsyncClientConfig
+from nio.responses import DownloadResponse
+from nio.events.room_events import RoomMessage
 from nio.exceptions import EncryptionError
 
 # --- Configuration ---
@@ -31,16 +33,14 @@ TTS_URL = "http://tts:5003/synthesize"
 STORE_PATH = "/data/matrix-store"
 DEVICE_NAME = "e2ee-bot-device"
 
-# --- Matrix setup ---
+# --- Matrix client setup ---
 print("🚀 Bot starting...")
-
-store_path = "/data/matrix-store"
 
 client = AsyncClient(
     MATRIX_HOMESERVER,
     MATRIX_USER,
     device_id="BOTDEVICE",
-    store_path=store_path,
+    store_path=STORE_PATH,
     config=AsyncClientConfig(encryption_enabled=True),
 )
 client.device_name = DEVICE_NAME
@@ -61,7 +61,6 @@ async def login():
         exit(1)
 
 
-# --- Join room if invited ---
 async def invite_callback(room, event):
     print(f"📩 Invited to room {room.room_id}, joining...")
     try:
@@ -71,18 +70,23 @@ async def invite_callback(room, event):
         print(f"❌ Failed to join: {e}")
 
 
-# --- Download + Transcribe ---
-async def download_media(url: str, dest: str):
-    async with ClientSession() as session:
-        async with session.get(url) as resp:
-            with open(dest, "wb") as f:
-                f.write(await resp.read())
+def extract_text_from_stt(stt_raw):
+    try:
+        outer = json.loads(stt_raw)
+        inner_json = outer.get("text", "")
+        if not inner_json:
+            return ""
+        matches = re.findall(r'{\s*"text"\s*:\s*"([^"]*)"\s*}', inner_json)
+        return " ".join(matches).strip()
+    except Exception as e:
+        print(f"❌ Failed to extract text: {e}")
+        return ""
 
 
 async def transcribe_audio(audio_file_path):
     for _ in range(5):
         try:
-            async with aiohttp.ClientSession() as session:
+            async with ClientSession() as session:
                 with open(audio_file_path, "rb") as f:
                     data = {"audio": f}
                     async with session.post(STT_URL, data=data) as resp:
@@ -97,23 +101,27 @@ async def generate_response(prompt):
     async with ClientSession() as session:
         async with session.post(LLM_URL, json={"prompt": prompt}) as resp:
             result = await resp.json()
+            print("raw response:", result)
             return result.get("response", "")
 
 
 async def synthesize_speech(text, out_path):
+    if not text.strip():
+        print("⚠️ Empty or invalid text for TTS, skipping synthesis.")
+        return
+
     async with ClientSession() as session:
         async with session.post(TTS_URL, json={"text": text}) as resp:
+            if resp.status != 200:
+                error = await resp.text()
+                raise RuntimeError(f"TTS failed: {resp.status} — {error}")
             audio = await resp.read()
             with open(out_path, "wb") as f:
                 f.write(audio)
 
 
-# --- Respond with audio ---
-
-
 async def send_audio_response(room_id, audio_path):
     mime_type, _ = mimetypes.guess_type(audio_path)
-
     try:
         with open(audio_path, "rb") as f:
             upload_response, _ = await client.upload(
@@ -142,7 +150,6 @@ async def send_audio_response(room_id, audio_path):
             print("📤 Sent audio reply")
         else:
             print("❌ Upload failed:", upload_response)
-
     except Exception as e:
         print("❌ Upload error:", str(e))
 
@@ -157,13 +164,11 @@ async def handle_voice_event(room, audio_event):
     print(f"🔗 Raw MXC URL: {mxc_url}")
 
     try:
-        # Attempt to download using authenticated matrix-nio client
         response = await client.download(mxc_url)
         if not isinstance(response, DownloadResponse):
             print(f"❌ Matrix client download failed: {response}")
             return
 
-        # Write audio to temporary file
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_audio:
             tmp_audio.write(response.body)
             tmp_audio.flush()
@@ -172,31 +177,35 @@ async def handle_voice_event(room, audio_event):
             print(f"🔊 Downloaded audio ({file_size} bytes) → {tmp_audio.name}")
 
             if file_size < 1000:
-                print("⚠️ Downloaded audio file is too small, skipping.")
+                print("⚠️ Audio file too small, skipping.")
                 return
 
-            # Run STT → LLM → TTS flow
-            try:
-                text = await transcribe_audio(tmp_audio.name)
-                print("📝 Transcribed:", text)
+            stt_raw = await transcribe_audio(tmp_audio.name)
+            print("📝 Raw STT:", stt_raw)
 
-                reply = await generate_response(text)
-                print("💬 LLM:", reply)
+            clean_text = extract_text_from_stt(stt_raw)
+            print("🧼 Extracted Text:", clean_text)
 
-                with tempfile.NamedTemporaryFile(
-                    suffix=".wav", delete=False
-                ) as reply_audio:
-                    await synthesize_speech(reply, reply_audio.name)
-                    await send_audio_response(room.room_id, reply_audio.name)
+            if not clean_text:
+                print("⚠️ No meaningful text extracted, skipping response.")
+                return
 
-            except Exception as e:
-                print(f"❌ Failed to handle voice message: {e}")
+            reply = await generate_response(clean_text)
+            print(f"💬 LLM reply: {repr(reply)}")
+            print("💬 LLM:", reply)
+
+            if not reply.strip():
+                reply = "Sorry, I didn't catch that. Could you please repeat?"
+
+            with tempfile.NamedTemporaryFile(
+                suffix=".wav", delete=False
+            ) as reply_audio:
+                print(f"📢 Sending to TTS: {repr(reply)}")
+                await synthesize_speech(reply, reply_audio.name)
+                await send_audio_response(room.room_id, reply_audio.name)
 
     except Exception as e:
-        print(f"❌ Unexpected error while downloading audio: {e}")
-
-
-# --- Main event handler ---
+        print(f"❌ Error in voice handler: {e}")
 
 
 async def encrypted_message_callback(room, event):
@@ -204,42 +213,25 @@ async def encrypted_message_callback(room, event):
     if not isinstance(event, MegolmEvent):
         return
 
-    print(f"📥 Received encrypted event in {room.display_name} from {event.sender}")
-
     try:
-        # Try to decrypt and handle voice messages
         if isinstance(event.decrypted, RoomMessageAudio):
-            print("🔓 Decrypted event is a voice message (RoomMessageAudio)")
+            print("🔓 Decrypted voice message")
             await handle_voice_event(room, event.decrypted)
-        else:
-            print(f"ℹ️ Decrypted event is not a voice message: {type(event.decrypted)}")
-
-    except EncryptionError as e:
-        print(f"⚠️ Encryption error: {e}. Trying key query...")
-
-        sender = event.sender
-        print(f"🔑 Performing key query for {sender}")
-        await client.keys_query([sender])
-
-        await asyncio.sleep(1)  # give time for key sync
-
+    except EncryptionError:
+        print("🔑 Retrying key sync...")
+        await client.keys_query([event.sender])
+        await asyncio.sleep(1)
         try:
             await client.decrypt_event(event)
             if isinstance(event.decrypted, RoomMessageAudio):
-                print("🔁 Retry successful: voice message decrypted")
                 await handle_voice_event(room, event.decrypted)
-            else:
-                print(
-                    f"⚠️ Retry decrypted to unsupported event type: {type(event.decrypted)}"
-                )
-        except Exception as e2:
-            print(f"❌ Retry decryption failed: {e2}")
+        except Exception as e:
+            print(f"❌ Decryption retry failed: {e}")
 
 
 async def plain_audio_callback(room, event):
-    if event.sender == client.user:  # avoid replying to self
+    if event.sender == client.user:
         return
-
     if isinstance(event, RoomMessageAudio):
         print(f"🎧 Received plain audio message in {room.display_name}")
         await handle_voice_event(room, event)
@@ -249,10 +241,9 @@ async def debug_callback(room, event):
     print(f"🐛 Debug: Got event of type {type(event)} from {event.sender}")
 
 
-# --- Run bot ---
 async def main():
     await login()
-    print("🔍 Joined rooms and encryption state:")
+    print("🔍 Rooms joined:")
     for room_id, room in client.rooms.items():
         print(f" - {room.display_name} (Encrypted: {room.encrypted})")
 
@@ -266,3 +257,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

@@ -1,6 +1,8 @@
 import torch
 from flask import Flask, request, jsonify, send_file
 from TTS.api import TTS
+import traceback
+import tempfile
 
 app = Flask(__name__)
 
@@ -8,25 +10,31 @@ app = Flask(__name__)
 use_gpu = torch.backends.mps.is_available()
 
 # Load Coqui TTS model with GPU acceleration
-MODEL_NAME = "tts_models/en/ljspeech/tacotron2-DDC"
-tts = TTS(MODEL_NAME, gpu=use_gpu)
+tts = TTS(
+    model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False
+)
+
+# tts = TTS(MODEL_NAME, gpu=use_gpu)
 
 
 @app.route("/synthesize", methods=["POST"])
 def text_to_speech():
     try:
         data = request.json
-        text = data.get("text", "")
+        text = data.get("text", "").strip()
 
         if not text:
             return jsonify({"error": "No text provided"}), 400
 
-        output_path = "output.wav"
-        tts.tts_to_file(text=text, file_path=output_path)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+            path = tmp_file.name
+            tts.tts_to_file(text=text, file_path=path)
 
-        return send_file(output_path, mimetype="audio/wav")
+        return send_file(path, mimetype="audio/wav")
 
     except Exception as e:
+        traceback.print_exc()
+        app.logger.error("Exception in TTS:", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
