@@ -12,11 +12,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the latest rust and pip
+# Install the latest Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN pip install --upgrade pip
+RUN pip install gunicorn
+
 
 # Copy Python dependency file
 COPY requirements.txt .
@@ -28,5 +30,6 @@ COPY . .
 # Expose port 5003 for the TTS service
 EXPOSE 5003
 
-CMD ["python3", "tts_server.py"]
+# CMD ["python3", "tts_server.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5003", "tts_server:app"]
 

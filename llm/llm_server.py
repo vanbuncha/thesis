@@ -21,7 +21,7 @@ def generate():
         json_data = json.loads(raw_data)
         app.logger.debug("Parsed JSON Data: %s", json_data)
 
-        user_input = json_data.get("text", "")
+        user_input = json_data.get("prompt", "")
 
         # Call Ollama API with streaming enabled
         response = requests.post(

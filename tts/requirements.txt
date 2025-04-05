@@ -1,7 +1,4 @@
-flask
-torch==2.1.0  
-numpy
-scipy
-soundfile
-coqui-tts==0.25.3
-
+Flask
+requests
+TTS
+torch
