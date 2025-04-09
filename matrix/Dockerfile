@@ -1,29 +1,35 @@
-# Use slim Python 3.10 as base
 FROM python:3.10-slim
 
-# Install libolm and compiler tools
-RUN apt-get update && \
-    apt-get install -y libolm-dev gcc g++ && \
-    rm -rf /var/lib/apt/lists/*
+# Install required packages (libolm, ffmpeg, build tools)
+RUN apt-get update && apt-get install -y \
+    libolm-dev \
+    ffmpeg \
+    gcc \
+    g++ \
+    build-essential \
+    python3-dev \
+    python3-setuptools \
+    python3-wheel \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Install Python dependencies including matrix-nio[e2e]
+# Pre-install pip, wheel, and matrix-nio[e2e]
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip
-RUN apt-get update && apt-get install -y ffmpeg
-RUN pip install --no-cache-dir "matrix-nio[e2e]" aiohttp
-RUN pip install --no-cache-dir -r requirements.txt
-RUN mkdir -p /data/matrix-store && chmod -R 777 /data
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir --upgrade build \
+    && pip install --no-cache-dir "matrix-nio[e2e]" aiohttp \
+    && pip install --no-cache-dir -r requirements.txt
 
 
-# Copy the rest of the code
+# Create Matrix store dir with safer permissions
+RUN mkdir -p /data/matrix-store && chmod -R 755 /data
+
+# Copy rest of app code
 COPY . .
 
-# Optional: expose healthcheck or debug port if needed
 EXPOSE 5004
 
-# Default command
 CMD ["python", "-u", "bot.py"]
 
