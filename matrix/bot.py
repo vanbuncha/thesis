@@ -6,7 +6,6 @@ import aiohttp
 import asyncio
 import tempfile
 import traceback
-from base64 import b64decode
 
 
 from aiohttp import ClientSession
@@ -17,12 +16,10 @@ from nio import (
     InviteMemberEvent,
     RoomInviteError,
     UploadResponse,
-    MegolmEvent,
     AsyncClientConfig,
 )
 from nio.responses import DownloadResponse
 from nio.events.room_events import RoomMessage, RoomEncryptedAudio
-from nio.exceptions import EncryptionError
 from nio.crypto.attachments import decrypt_attachment
 
 
@@ -133,22 +130,42 @@ async def send_audio_response(room_id, audio_path):
     mime_type, _ = mimetypes.guess_type(audio_path)
     try:
         with open(audio_path, "rb") as f:
-            upload_response, _ = await client.upload(
+            upload_response, encrypted = await client.upload(
                 f,
                 content_type=mime_type or "audio/wav",
                 filename="response.wav",
+                encrypt=client.rooms[room_id].encrypted,
             )
 
         if isinstance(upload_response, UploadResponse):
             content = {
                 "body": "response.wav",
                 "msgtype": "m.audio",
-                "url": upload_response.content_uri,
                 "info": {
                     "mimetype": mime_type,
                     "size": os.path.getsize(audio_path),
                 },
             }
+
+            if encrypted:
+                content["file"] = {
+                    "url": upload_response.content_uri,
+                    "key": {
+                        "alg": encrypted["key"]["alg"],
+                        "k": encrypted["key"]["k"],
+                    },
+                    "iv": encrypted["iv"],
+                    "hashes": {
+                        "sha256": encrypted["hashes"]["sha256"],
+                    },
+                }
+            else:
+                content["file"] = {
+                    "url": upload_response.content_uri,
+                    "key": {"alg": "A256CTR", "k": "dummy"},
+                    "iv": "dummy",
+                    "hashes": {"sha256": "dummy"},
+                }
 
             await client.room_send(
                 room_id=room_id,
@@ -164,6 +181,10 @@ async def send_audio_response(room_id, audio_path):
 
 
 async def handle_voice_event(room, audio_event):
+    if audio_event.sender == client.user:
+        print("🤖 Ignoring own audio message.")
+        return
+
     mxc_url = audio_event.url
     if not mxc_url:
         print("⚠️ No MXC URL found in event.")
@@ -282,4 +303,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
