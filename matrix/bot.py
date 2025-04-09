@@ -5,6 +5,9 @@ import mimetypes
 import aiohttp
 import asyncio
 import tempfile
+import traceback
+from base64 import b64decode
+
 
 from aiohttp import ClientSession
 from nio import (
@@ -18,8 +21,10 @@ from nio import (
     AsyncClientConfig,
 )
 from nio.responses import DownloadResponse
-from nio.events.room_events import RoomMessage
+from nio.events.room_events import RoomMessage, RoomEncryptedAudio
 from nio.exceptions import EncryptionError
+from nio.crypto.attachments import decrypt_attachment
+
 
 # --- Configuration ---
 MATRIX_HOMESERVER = os.getenv("MATRIX_HOMESERVER", "https://matrix.org")
@@ -32,6 +37,10 @@ TTS_URL = "http://tts:5003/synthesize"
 
 STORE_PATH = "/data/matrix-store"
 DEVICE_NAME = "e2ee-bot-device"
+
+
+# --- Helper functions ---
+
 
 # --- Matrix client setup ---
 print("🚀 Bot starting...")
@@ -169,8 +178,29 @@ async def handle_voice_event(room, audio_event):
             print(f"❌ Matrix client download failed: {response}")
             return
 
+        file_data = response.body
+
+        # If it's an encrypted event and marked as decrypted, attempt to decrypt
+        if isinstance(audio_event, RoomEncryptedAudio) and getattr(
+            audio_event, "decrypted", False
+        ):
+            try:
+                print("🔓 Decrypting downloaded attachment...")
+                file_data = decrypt_attachment(
+                    file_data,
+                    audio_event.key["k"],
+                    audio_event.hashes["sha256"],
+                    audio_event.iv,
+                )
+
+            except Exception as ex:
+                print("❌ Failed to decrypt attachment:", ex)
+                traceback.print_exc()
+                return
+
+        # Save audio to temp file
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_audio:
-            tmp_audio.write(response.body)
+            tmp_audio.write(file_data)
             tmp_audio.flush()
 
             file_size = os.path.getsize(tmp_audio.name)
@@ -180,6 +210,7 @@ async def handle_voice_event(room, audio_event):
                 print("⚠️ Audio file too small, skipping.")
                 return
 
+            # Transcribe, Generate, Synthesize, Send
             stt_raw = await transcribe_audio(tmp_audio.name)
             print("📝 Raw STT:", stt_raw)
 
@@ -206,27 +237,21 @@ async def handle_voice_event(room, audio_event):
 
     except Exception as e:
         print(f"❌ Error in voice handler: {e}")
+        traceback.print_exc()
 
 
 async def encrypted_message_callback(room, event):
-    print(f"🔐 Received MegolmEvent from {event.sender} in {room.display_name}")
-    if not isinstance(event, MegolmEvent):
+    print(f"🔐 Received encrypted event from {event.sender} in {room.display_name}")
+    print("🔎 Initial event state:", event)
+
+    if getattr(event, "decrypted", False):
+        print("🔓 Event already decrypted. Processing it as a plain audio message.")
+        await handle_voice_event(room, event)
         return
 
-    try:
-        if isinstance(event.decrypted, RoomMessageAudio):
-            print("🔓 Decrypted voice message")
-            await handle_voice_event(room, event.decrypted)
-    except EncryptionError:
-        print("🔑 Retrying key sync...")
-        await client.keys_query([event.sender])
-        await asyncio.sleep(1)
-        try:
-            await client.decrypt_event(event)
-            if isinstance(event.decrypted, RoomMessageAudio):
-                await handle_voice_event(room, event.decrypted)
-        except Exception as e:
-            print(f"❌ Decryption retry failed: {e}")
+    print(
+        "⚠️ Event is not decrypted and cannot be processed with decrypt_event for this event type."
+    )
 
 
 async def plain_audio_callback(room, event):
@@ -248,7 +273,7 @@ async def main():
         print(f" - {room.display_name} (Encrypted: {room.encrypted})")
 
     client.add_event_callback(invite_callback, InviteMemberEvent)
-    client.add_event_callback(encrypted_message_callback, MegolmEvent)
+    client.add_event_callback(encrypted_message_callback, RoomEncryptedAudio)
     client.add_event_callback(debug_callback, RoomMessage)
     client.add_event_callback(plain_audio_callback, RoomMessageAudio)
 
