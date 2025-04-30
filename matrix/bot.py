@@ -53,13 +53,13 @@ client.device_name = DEVICE_NAME
 
 
 async def login():
-    print("🔐 Attempting login...")
+    print("Attempting login...")
     resp = await client.login(MATRIX_PASSWORD)
-    print("📡 Login response:", resp)
-    print(f"🪪 Access token: {client.access_token}")
+    print("Login response:", resp)
+    print(f"Access token: {client.access_token}")
 
     if isinstance(resp, LoginResponse):
-        print("✅ Logged in as", MATRIX_USER)
+        print("Logged in as", MATRIX_USER)
         client.access_token = resp.access_token
         await client.sync(full_state=True)
     else:
@@ -68,7 +68,7 @@ async def login():
 
 
 async def invite_callback(room, event):
-    print(f"📩 Invited to room {room.room_id}, joining...")
+    print(f"Invited to room {room.room_id}, joining...")
     try:
         await client.join(room.room_id)
         print(f"✅ Joined {room.room_id}")
@@ -113,7 +113,7 @@ async def generate_response(prompt):
 
 async def synthesize_speech(text, out_path):
     if not text.strip():
-        print("⚠️ Empty or invalid text for TTS, skipping synthesis.")
+        print("Empty or invalid text for TTS, skipping synthesis.")
         return
 
     async with ClientSession() as session:
@@ -173,7 +173,7 @@ async def send_audio_response(room_id, audio_path):
                 content=content,
                 ignore_unverified_devices=True,
             )
-            print("📤 Sent audio reply")
+            print("Sent audio reply")
         else:
             print("❌ Upload failed:", upload_response)
     except Exception as e:
@@ -182,21 +182,21 @@ async def send_audio_response(room_id, audio_path):
 
 async def handle_voice_event(room, audio_event):
     if audio_event.sender == client.user:
-        print("🤖 Ignoring own audio message.")
+        print("Ignoring own audio message.")
         return
 
     mxc_url = audio_event.url
     if not mxc_url:
-        print("⚠️ No MXC URL found in event.")
+        print("No MXC URL found in event.")
         return
 
-    print(f"🎙️ Voice message in {room.display_name}")
-    print(f"🔗 Raw MXC URL: {mxc_url}")
+    print(f"Voice message in {room.display_name}")
+    print(f"Raw MXC URL: {mxc_url}")
 
     try:
         response = await client.download(mxc_url)
         if not isinstance(response, DownloadResponse):
-            print(f"❌ Matrix client download failed: {response}")
+            print(f"Matrix client download failed: {response}")
             return
 
         file_data = response.body
@@ -206,7 +206,7 @@ async def handle_voice_event(room, audio_event):
             audio_event, "decrypted", False
         ):
             try:
-                print("🔓 Decrypting downloaded attachment...")
+                print("Decrypting downloaded attachment...")
                 file_data = decrypt_attachment(
                     file_data,
                     audio_event.key["k"],
@@ -225,21 +225,21 @@ async def handle_voice_event(room, audio_event):
             tmp_audio.flush()
 
             file_size = os.path.getsize(tmp_audio.name)
-            print(f"🔊 Downloaded audio ({file_size} bytes) → {tmp_audio.name}")
+            print(f"Downloaded audio ({file_size} bytes) → {tmp_audio.name}")
 
             if file_size < 1000:
-                print("⚠️ Audio file too small, skipping.")
+                print("Audio file too small, skipping.")
                 return
 
             # Transcribe, Generate, Synthesize, Send
             stt_raw = await transcribe_audio(tmp_audio.name)
-            print("📝 Raw STT:", stt_raw)
+            print("Raw STT:", stt_raw)
 
             clean_text = extract_text_from_stt(stt_raw)
-            print("🧼 Extracted Text:", clean_text)
+            print("Extracted Text:", clean_text)
 
             if not clean_text:
-                print("⚠️ No meaningful text extracted, skipping response.")
+                print("No meaningful text extracted, skipping response.")
                 return
 
             reply = await generate_response(clean_text)
@@ -252,7 +252,7 @@ async def handle_voice_event(room, audio_event):
             with tempfile.NamedTemporaryFile(
                 suffix=".wav", delete=False
             ) as reply_audio:
-                print(f"📢 Sending to TTS: {repr(reply)}")
+                print(f"Sending to TTS: {repr(reply)}")
                 await synthesize_speech(reply, reply_audio.name)
                 await send_audio_response(room.room_id, reply_audio.name)
 
@@ -262,16 +262,16 @@ async def handle_voice_event(room, audio_event):
 
 
 async def encrypted_message_callback(room, event):
-    print(f"🔐 Received encrypted event from {event.sender} in {room.display_name}")
-    print("🔎 Initial event state:", event)
+    print(f"Received encrypted event from {event.sender} in {room.display_name}")
+    print("Initial event state:", event)
 
     if getattr(event, "decrypted", False):
-        print("🔓 Event already decrypted. Processing it as a plain audio message.")
+        print("Event already decrypted. Processing it as a plain audio message.")
         await handle_voice_event(room, event)
         return
 
     print(
-        "⚠️ Event is not decrypted and cannot be processed with decrypt_event for this event type."
+        "Event is not decrypted and cannot be processed with decrypt_event for this event type."
     )
 
 
@@ -289,7 +289,7 @@ async def debug_callback(room, event):
 
 async def main():
     await login()
-    print("🔍 Rooms joined:")
+    print("Rooms joined:")
     for room_id, room in client.rooms.items():
         print(f" - {room.display_name} (Encrypted: {room.encrypted})")
 
