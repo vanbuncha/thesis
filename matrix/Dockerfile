@@ -27,7 +27,7 @@ RUN pip install --upgrade pip setuptools wheel \
 RUN mkdir -p /data/matrix-store && chmod -R 755 /data
 
 # Copy rest of app code
-COPY . .
+COPY bot.py db.py ./
 
 EXPOSE 5004
 

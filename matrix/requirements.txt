@@ -1,3 +1,5 @@
 aiohttp
 Flask
 requests
+asyncpg>=0.27.0
+

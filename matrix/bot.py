@@ -10,6 +10,9 @@ import wave
 import logging
 
 
+from db import init_db_pool, save_message
+
+
 from aiohttp import ClientSession
 from nio import (
     AsyncClient,
@@ -23,7 +26,8 @@ from nio.responses import DownloadResponse
 from nio.events.room_events import RoomMessage, RoomEncryptedAudio
 from nio.crypto.attachments import decrypt_attachment
 
-logging.basicConfig(level=logging.WARNING)
+
+logging.getLogger("nio").setLevel(logging.WARNING)
 
 
 # --- Configuration ---
@@ -38,6 +42,7 @@ TTS_URL = "http://tts:5003/synthesize"
 STORE_PATH = "/data/matrix-store"
 DEVICE_NAME = "e2ee-bot-device"
 
+_pool = None
 
 # --- Helper functions ---
 
@@ -219,7 +224,7 @@ async def handle_voice_event(room, audio_event):
 
         file_data = response.body
 
-        # If it's an encrypted event and marked as decrypted, attempt to decrypt
+        # If it's an encrypted event and marked as decrypted, decrypt it
         if isinstance(audio_event, RoomEncryptedAudio) and getattr(
             audio_event, "decrypted", False
         ):
@@ -231,7 +236,6 @@ async def handle_voice_event(room, audio_event):
                     audio_event.hashes["sha256"],
                     audio_event.iv,
                 )
-
             except Exception as ex:
                 print("❌ Failed to decrypt attachment:", ex)
                 traceback.print_exc()
@@ -242,36 +246,41 @@ async def handle_voice_event(room, audio_event):
             tmp_audio.write(file_data)
             tmp_audio.flush()
 
-            file_size = os.path.getsize(tmp_audio.name)
-            print(f"Downloaded audio ({file_size} bytes) → {tmp_audio.name}")
+        file_size = os.path.getsize(tmp_audio.name)
+        print(f"Downloaded audio ({file_size} bytes) → {tmp_audio.name}")
 
-            if file_size < 1000:
-                print("Audio file too small, skipping.")
-                return
+        if file_size < 1000:
+            print("Audio file too small, skipping.")
+            return
 
-            # Transcribe, Generate, Synthesize, Send
-            stt_raw = await transcribe_audio(tmp_audio.name)
-            print("Raw STT:", stt_raw)
+        # --- TRANSCRIBE ---
+        stt_raw = await transcribe_audio(tmp_audio.name)
+        print("Raw STT:", stt_raw)
 
-            clean_text = extract_text_from_stt(stt_raw)
-            print("Extracted Text:", clean_text)
+        clean_text = extract_text_from_stt(stt_raw)
+        print("Extracted Text:", clean_text)
 
-            if not clean_text:
-                print("No meaningful text extracted, skipping response.")
-                return
+        if not clean_text:
+            print("No meaningful text extracted, skipping response.")
+            return
 
-            reply = await generate_response(clean_text)
-            print(f"💬 LLM reply: {repr(reply)}")
+        # ** Persist the user’s question **
+        await save_message(room.room_id, audio_event.sender, "user", clean_text)
 
-            if not reply.strip():
-                reply = "Sorry, I didn't catch that. Could you please repeat?"
+        # --- GENERATE ---
+        reply = await generate_response(clean_text)
+        print(f"💬 LLM reply: {repr(reply)}")
 
-            with tempfile.NamedTemporaryFile(
-                suffix=".wav", delete=False
-            ) as reply_audio:
-                print("Sending to TTS ...}")
-                await synthesize_speech(reply, reply_audio.name)
-                await send_audio_response(room.room_id, reply_audio.name)
+        if not reply.strip():
+            reply = "Sorry, I didn't catch that. Could you please repeat."
+
+        await save_message(room.room_id, client.user, "assistant", reply)
+
+        # --- SYNTHESIZE & SEND ---
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as reply_audio:
+            print("Sending to TTS …")
+            await synthesize_speech(reply, reply_audio.name)
+            await send_audio_response(room.room_id, reply_audio.name)
 
     except Exception as e:
         print(f"❌ Error in voice handler: {e}")
@@ -305,6 +314,7 @@ async def debug_callback(room, event):
 
 
 async def main():
+    await init_db_pool()  # db
     await login()
     print("Rooms joined:")
     for room_id, room in client.rooms.items():
