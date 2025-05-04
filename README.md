@@ -1,19 +1,19 @@
 # Repository for thesis - 2025
 
-Add models folder models to:
+## Add models folder models to:
 llm/
 tts/
 stt/
 
 
-tts models :
+### tts models link :
 https://alphacephei.com/vosk/models
 
-LLM ollama setup:
+### LLM ollama setup:
 `docker exec -it ollama bash`
 
 
-###db
+### db
 1. bash into db
 `docker exec -it elderly_care_db bash`
 
