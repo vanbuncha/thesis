@@ -6,6 +6,8 @@ import aiohttp
 import asyncio
 import tempfile
 import traceback
+import wave
+import logging
 
 
 from aiohttp import ClientSession
@@ -15,12 +17,13 @@ from nio import (
     RoomMessageAudio,
     InviteMemberEvent,
     RoomInviteError,
-    UploadResponse,
     AsyncClientConfig,
 )
 from nio.responses import DownloadResponse
 from nio.events.room_events import RoomMessage, RoomEncryptedAudio
 from nio.crypto.attachments import decrypt_attachment
+
+logging.basicConfig(level=logging.WARNING)
 
 
 # --- Configuration ---
@@ -61,7 +64,7 @@ async def login():
     if isinstance(resp, LoginResponse):
         print("Logged in as", MATRIX_USER)
         client.access_token = resp.access_token
-        await client.sync(full_state=True)
+        await client.sync()
     else:
         print("❌ Login failed:", resp)
         exit(1)
@@ -128,56 +131,71 @@ async def synthesize_speech(text, out_path):
 
 async def send_audio_response(room_id, audio_path):
     mime_type, _ = mimetypes.guess_type(audio_path)
+    room = client.rooms[room_id]
+    encrypted_room = room.encrypted
+
     try:
+        # compute duration if it's a WAV
+        duration_ms = None
+        if audio_path.endswith(".wav"):
+            with wave.open(audio_path, "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                duration_ms = int((frames / float(rate)) * 1000)
+
         with open(audio_path, "rb") as f:
-            upload_response, encrypted = await client.upload(
-                f,
-                content_type=mime_type or "audio/wav",
-                filename="response.wav",
-                encrypt=client.rooms[room_id].encrypted,
-            )
-
-        if isinstance(upload_response, UploadResponse):
-            content = {
-                "body": "response.wav",
-                "msgtype": "m.audio",
-                "info": {
-                    "mimetype": mime_type,
-                    "size": os.path.getsize(audio_path),
-                },
-            }
-
-            if encrypted:
-                content["file"] = {
-                    "url": upload_response.content_uri,
-                    "key": {
-                        "alg": encrypted["key"]["alg"],
-                        "k": encrypted["key"]["k"],
-                    },
-                    "iv": encrypted["iv"],
-                    "hashes": {
-                        "sha256": encrypted["hashes"]["sha256"],
-                    },
-                }
+            if encrypted_room:
+                upload_response, enc_data = await client.upload(
+                    f,
+                    content_type=mime_type or "audio/wav",
+                    filename="response.wav",
+                    encrypt=True,
+                )
             else:
-                content["file"] = {
-                    "url": upload_response.content_uri,
-                    "key": {"alg": "A256CTR", "k": "dummy"},
-                    "iv": "dummy",
-                    "hashes": {"sha256": "dummy"},
-                }
+                upload_response = await client.upload(
+                    f,
+                    content_type=mime_type or "audio/wav",
+                    filename="response.wav",
+                    encrypt=False,
+                )
+                enc_data = None
 
-            await client.room_send(
-                room_id=room_id,
-                message_type="m.room.message",
-                content=content,
-                ignore_unverified_devices=True,
-            )
-            print("Sent audio reply")
-        else:
+        if not hasattr(upload_response, "content_uri"):
             print("❌ Upload failed:", upload_response)
+            return
+
+        content = {
+            "body": "response.wav",
+            "msgtype": "m.audio",
+            "info": {
+                "mimetype": mime_type,
+                "size": os.path.getsize(audio_path),
+            },
+        }
+        if duration_ms is not None:
+            content["info"]["duration"] = duration_ms
+
+        if encrypted_room:
+            content["file"] = {
+                "url": upload_response.content_uri,
+                "key": enc_data["key"],
+                "iv": enc_data["iv"],
+                "hashes": enc_data["hashes"],
+            }
+        else:
+            content["url"] = upload_response.content_uri
+
+        await client.room_send(
+            room_id=room_id,
+            message_type="m.room.message",
+            content=content,
+            ignore_unverified_devices=True,
+        )
+
+        print("✅ Sent audio reply")
+
     except Exception as e:
-        print("❌ Upload error:", str(e))
+        print("❌ Upload or send error:", str(e))
 
 
 async def handle_voice_event(room, audio_event):
@@ -244,7 +262,6 @@ async def handle_voice_event(room, audio_event):
 
             reply = await generate_response(clean_text)
             print(f"💬 LLM reply: {repr(reply)}")
-            print("💬 LLM:", reply)
 
             if not reply.strip():
                 reply = "Sorry, I didn't catch that. Could you please repeat?"
@@ -252,7 +269,7 @@ async def handle_voice_event(room, audio_event):
             with tempfile.NamedTemporaryFile(
                 suffix=".wav", delete=False
             ) as reply_audio:
-                print(f"Sending to TTS: {repr(reply)}")
+                print("Sending to TTS ...}")
                 await synthesize_speech(reply, reply_audio.name)
                 await send_audio_response(room.room_id, reply_audio.name)
 
