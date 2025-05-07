@@ -26,7 +26,11 @@ def generate():
         # Call Ollama API with streaming enabled
         response = requests.post(
             OLLAMA_URL,
-            json={"model": "mistral", "prompt": user_input, "stream": True},
+            json={
+                "model": "mistral",  # specify llm model
+                "prompt": user_input,
+                "stream": True,
+            },
             stream=True,  # Enables token-by-token response
         )
 

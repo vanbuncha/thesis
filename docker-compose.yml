@@ -97,6 +97,16 @@ services:
       - ./matrix/store:/data/matrix-store
     networks:
       - elderly_care_network
+  # matrix-synapse homeserver
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: matrix-synapse
+    volumes:
+      - ./synapse/data:/data
+    ports:
+      - "8008:8008"
+    networks:
+      - elderly_care_network
 
 # Docker Network
 networks:
