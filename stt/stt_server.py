@@ -1,60 +1,36 @@
 from flask import Flask, request, jsonify
-from vosk import Model, KaldiRecognizer
-import wave
 import os
 import logging
-import subprocess
-# from pydub import AudioSegment
-
+import wave
+from vosk import Model, KaldiRecognizer
 
 app = Flask(__name__)
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-
-# Load STT model
-model = Model("/app/models/vosk-model-small-en-us-0.15")  # Path to Vosk model
+model = Model("models/vosk-model-small-en-us-0.15")
 
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe_audio():
-    input_path = "temp_input.ogg"
-    output_path = "temp.wav"
+    input_pcm_path = "temp_input.raw"
+    output_wav_path = "temp_output.wav"
 
     try:
         audio_file = request.files["audio"]
-        audio_file.save(input_path)
-        file_size = os.path.getsize(input_path)
-        logging.debug(f"Saved input audio as {input_path} ({file_size} bytes)")
+        audio_file.save(input_pcm_path)
+        file_size = os.path.getsize(input_pcm_path)
+        logging.debug(f"Saved input audio as {input_pcm_path} ({file_size} bytes)")
 
         if file_size < 1000:
             logging.error("Audio file too small or empty.")
             return jsonify({"error": "Audio file is empty or corrupted"}), 400
 
-        # Optional: inspect header
-        with open(input_path, "rb") as f:
-            header = f.read(4)
-            if header != b"OggS":
-                logging.error(f"Invalid file header: {header}")
-                return jsonify(
-                    {"error": "File does not appear to be a valid OGG audio file"}
-                ), 400
+        with wave.open(output_wav_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit PCM = 2 bytes
+            wf.setframerate(16000)
+            with open(input_pcm_path, "rb") as pcm:
+                wf.writeframes(pcm.read())
 
-        # Convert to WAV using ffmpeg
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", input_path, "-ac", "1", "-ar", "16000", output_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        if result.returncode != 0:
-            logging.error("ffmpeg failed: %s", result.stderr.decode())
-            return jsonify(
-                {"error": f"Could not decode audio: {result.stderr.decode()}"}
-            ), 400
-
-        # Transcribe with Vosk
-        wf = wave.open(output_path, "rb")
+        wf = wave.open(output_wav_path, "rb")
         if (
             wf.getnchannels() != 1
             or wf.getsampwidth() != 2
@@ -86,8 +62,7 @@ def transcribe_audio():
         return jsonify({"error": str(e)}), 500
 
     finally:
-        # Always clean up
-        for path in [input_path, output_path]:
+        for path in [input_pcm_path, output_wav_path]:
             if os.path.exists(path):
                 os.remove(path)
 
