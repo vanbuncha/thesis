@@ -75,38 +75,52 @@ services:
       POSTGRES_PASSWORD: securepassword
       POSTGRES_DB: elderly_care_db
 
+  #--------------------------- DEPRECATED ----------------------------
   # Matrix Protocol Service (Synapse)
-  matrix:
-    build: ./matrix
-    depends_on:
-      - database
-      - llm
-      - stt
-      - tts
-    env_file:
-      - .env
-    environment:
-      - POSTGRES_HOST=database
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=elderly_user
-      - POSTGRES_PASSWORD=securepassword
-      - POSTGRES_DB=elderly_care_db
-    ports:
-      - "5004:5004"
-    volumes:
-      - ./matrix/store:/data/matrix-store
-    networks:
-      - elderly_care_network
+  # matrix:
+  #   build: ./matrix
+  #   depends_on:
+  #     - database
+  #     - llm
+  #     - stt
+  #     - tts
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - POSTGRES_HOST=database
+  #     - POSTGRES_PORT=5432
+  #     - POSTGRES_USER=elderly_user
+  #     - POSTGRES_PASSWORD=securepassword
+  #     - POSTGRES_DB=elderly_care_db
+  #   ports:
+  #     - "5004:5004"
+  #   volumes:
+  #     - ./matrix/store:/data/matrix-store
+  #   networks:
+  #     - elderly_care_network
   # matrix-synapse homeserver
-  synapse:
-    image: matrixdotorg/synapse:latest
-    container_name: matrix-synapse
-    volumes:
-      - ./synapse/data:/data
+  #--------------------------- DEPRECATED ----------------------------
+  assistant:
+    build: ./assistant
     ports:
-      - "8008:8008"
+      - "8000:8000"
     networks:
       - elderly_care_network
+    depends_on:
+      - stt
+      - llm
+      - tts
+#--------------------------- DEPRECATED ----------------------------
+# synapse:
+#   image: matrixdotorg/synapse:latest
+#   container_name: matrix-synapse
+#   volumes:
+#     - ./synapse/data:/data
+#   ports:
+#     - "8008:8008"
+#   networks:
+#     - elderly_care_network
+#--------------------------- DEPRECATED ----------------------------
 
 # Docker Network
 networks:
