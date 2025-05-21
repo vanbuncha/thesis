@@ -3,13 +3,74 @@ import json
 import tempfile
 import aiohttp
 from fastapi import FastAPI, WebSocket
+from fastapi import APIRouter
+from fastapi.staticfiles import StaticFiles
+
 import asyncio
 
-STT_URL = "http://stt:5002/transcribe"
+STT_URL = "http://stt_vosk:5002/transcribe"
+# STT_URL = "http://stt_fastwhisper:5001/transcribe"
 LLM_URL = "http://llm:5001/generate"
 TTS_URL = "http://tts:5003/synthesize"
 
+
+services = {
+    "STT (Vosk)": "http://stt_vosk:5002/transcribe",
+    "STT (FastWhisper)": "http://stt_fastwhisper:5001/transcribe",
+    "LLM": "http://llm:5001/generate",
+    "TTS": "http://tts:5003/synthesize",
+    "Ollama": "http://ollama:11434/",
+    "Database": "http://database:5432/",
+}
+
 app = FastAPI()
+router = APIRouter()
+
+
+# -------- HEALTHCHECK ------------
+
+
+@router.get("/health")
+async def health_check():
+    results = {}
+
+    async with aiohttp.ClientSession() as session:
+        for name, url in services.items():
+            if url.startswith("http"):
+                try:
+                    # Decide method type based on endpoint
+                    if "/transcribe" in url:
+                        payload = aiohttp.FormData()
+                        payload.add_field(
+                            "audio", b"", filename="dummy.wav", content_type="audio/wav"
+                        )
+                        async with session.post(url, data=payload, timeout=2) as resp:
+                            results[name] = resp.status in (
+                                200,
+                                400,
+                            )  # Accept 400 for empty input
+                    elif "/generate" in url:
+                        async with session.post(
+                            url, json={"prompt": ""}, timeout=2
+                        ) as resp:
+                            results[name] = resp.status in (200, 400)
+                    elif "/synthesize" in url:
+                        async with session.post(
+                            url, json={"text": ""}, timeout=2
+                        ) as resp:
+                            results[name] = resp.status in (200, 400)
+                    else:
+                        async with session.get(url, timeout=2) as resp:
+                            results[name] = resp.status == 200
+                except Exception:
+                    results[name] = False
+            else:
+                results[name] = None  # Non-HTTP
+
+    return results
+
+
+# -------- HEALTHCHECK ------------
 
 
 def extract_text_from_stt(stt_raw):
@@ -103,3 +164,8 @@ async def websocket_audio(websocket: WebSocket):
 
     print("✅ Response sent, closing WebSocket")
     await websocket.close()
+
+
+# main
+app.include_router(router)
+app.mount("/static", StaticFiles(directory="static"), name="static")

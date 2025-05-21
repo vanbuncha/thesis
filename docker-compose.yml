@@ -2,7 +2,7 @@
 
 services:
   # Speech-to-Text (STT) Service
-  stt:
+  stt_vosk:
     image: sst_image
     container_name: stt_service
     build:
@@ -17,6 +17,17 @@ services:
     environment:
       - STT_MODEL_PATH=/app/models/vosk-model-en
     command: python stt_server.py
+  stt_fastwhisper:
+    container_name: stt_fastwhisper_service
+    build:
+      context: ./fastwhisper_stt
+      dockerfile: Dockerfile
+    image: fastwhisper_stt_image
+    ports:
+      - "5004:5001" # internal 5001 but external 5004 to avoid LLM service (LLM using 5001)
+    networks:
+      - elderly_care_network
+    command: gunicorn --bind 0.0.0.0:5001 stt_server:app
 
   # Text-to-Speech (TTS) Service
   tts:
@@ -71,9 +82,9 @@ services:
     networks:
       - elderly_care_network
     environment:
-      POSTGRES_USER: elderly_user
-      POSTGRES_PASSWORD: securepassword
-      POSTGRES_DB: elderly_care_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
 
   #--------------------------- DEPRECATED ----------------------------
   # Matrix Protocol Service (Synapse)
@@ -107,9 +118,13 @@ services:
     networks:
       - elderly_care_network
     depends_on:
-      - stt
+      # choose one stt
+      # - stt_vosk
+      - stt_fastwhisper
       - llm
       - tts
+    command: uvicorn ws_server:app --host 0.0.0.0 --port 8000
+
 #--------------------------- DEPRECATED ----------------------------
 # synapse:
 #   image: matrixdotorg/synapse:latest
