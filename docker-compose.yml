@@ -86,31 +86,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
 
-  #--------------------------- DEPRECATED ----------------------------
-  # Matrix Protocol Service (Synapse)
-  # matrix:
-  #   build: ./matrix
-  #   depends_on:
-  #     - database
-  #     - llm
-  #     - stt
-  #     - tts
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - POSTGRES_HOST=database
-  #     - POSTGRES_PORT=5432
-  #     - POSTGRES_USER=elderly_user
-  #     - POSTGRES_PASSWORD=securepassword
-  #     - POSTGRES_DB=elderly_care_db
-  #   ports:
-  #     - "5004:5004"
-  #   volumes:
-  #     - ./matrix/store:/data/matrix-store
-  #   networks:
-  #     - elderly_care_network
-  # matrix-synapse homeserver
-  #--------------------------- DEPRECATED ----------------------------
   assistant:
     build: ./assistant
     ports:
@@ -124,18 +99,6 @@ services:
       - llm
       - tts
     command: uvicorn ws_server:app --host 0.0.0.0 --port 8000
-
-#--------------------------- DEPRECATED ----------------------------
-# synapse:
-#   image: matrixdotorg/synapse:latest
-#   container_name: matrix-synapse
-#   volumes:
-#     - ./synapse/data:/data
-#   ports:
-#     - "8008:8008"
-#   networks:
-#     - elderly_care_network
-#--------------------------- DEPRECATED ----------------------------
 
 # Docker Network
 networks:

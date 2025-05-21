@@ -14,7 +14,10 @@ tts = TTS(
     model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False
 )
 
-# tts = TTS(MODEL_NAME, gpu=use_gpu)
+
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
 
 
 @app.route("/synthesize", methods=["POST"])

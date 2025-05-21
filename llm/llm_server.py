@@ -11,6 +11,11 @@ logging.basicConfig(level=logging.DEBUG)
 OLLAMA_URL = "http://ollama:11434/api/generate"  # Ollama API
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
     try:

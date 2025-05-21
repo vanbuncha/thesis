@@ -15,10 +15,10 @@ TTS_URL = "http://tts:5003/synthesize"
 
 
 services = {
-    "STT (Vosk)": "http://stt_vosk:5002/transcribe",
-    "STT (FastWhisper)": "http://stt_fastwhisper:5001/transcribe",
-    "LLM": "http://llm:5001/generate",
-    "TTS": "http://tts:5003/synthesize",
+    "STT (Vosk)": "http://stt_vosk:5002/health",
+    "STT (FastWhisper)": "http://stt_fastwhisper:5001/health",
+    "LLM": "http://llm:5001/health",
+    "TTS": "http://tts:5003/health",
     "Ollama": "http://ollama:11434/",
     "Database": "http://database:5432/",
 }

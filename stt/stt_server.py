@@ -8,6 +8,11 @@ app = Flask(__name__)
 model = Model("models/vosk-model-small-en-us-0.15")
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe_audio():
     input_pcm_path = "temp_input.raw"

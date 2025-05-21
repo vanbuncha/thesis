@@ -12,6 +12,11 @@ logging.basicConfig(level=logging.DEBUG)
 model = WhisperModel("base.en", compute_type="int8")
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe_audio():
     try:
