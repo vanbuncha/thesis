@@ -7,7 +7,6 @@ import logging
 app = FastAPI()
 
 # Logging setup
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = "http://ollama:11434/api/generate"  # Ollama API

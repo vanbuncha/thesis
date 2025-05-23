@@ -3,20 +3,18 @@
 services:
   # Speech-to-Text (STT) Service
   stt_vosk:
-    image: sst_image
     container_name: stt_service
     build:
       context: ./stt
       dockerfile: Dockerfile
     ports:
-      - "5002:5002"
+      - "5002:5001"
     volumes:
       - ./stt/models:/app/models
     networks:
       - elderly_care_network
     environment:
       - STT_MODEL_PATH=/app/models/vosk-model-en
-    command: python stt_server.py
   stt_fastwhisper:
     container_name: stt_fastwhisper_service
     build:
@@ -27,7 +25,6 @@ services:
       - "5004:5001" # internal 5001 but external 5004 to avoid LLM service (LLM using 5001)
     networks:
       - elderly_care_network
-    command: gunicorn --bind 0.0.0.0:5001 stt_server:app
 
   # Text-to-Speech (TTS) Service
   tts:
@@ -55,7 +52,7 @@ services:
       - "5001:5001"
     networks:
       - elderly_care_network
-    command: uvicorn llm_server:app --host 0.0.0.0 --port 5002 --log-level debug
+    command: uvicorn llm_server:app --host 0.0.0.0 --port 5001 --log-level debug
 
   # Ollama Service
   ollama:

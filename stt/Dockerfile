@@ -9,25 +9,20 @@ RUN apt-get update && apt-get install -y \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Set workdir 
 WORKDIR /app
 
-# Copy requirements
-COPY requirements.txt .
-
 # Install Python dependencies
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy rest of the app 
+# Copy application code
 COPY . .
 
-# Install any extra dependencies
-RUN pip install vosk flask pydub
-
-# Expose port
+# Expose port for FastAPI STT service
 EXPOSE 5001
 
-# Run STT server
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "stt_server:app"]
+# Launch FastAPI app
+CMD ["uvicorn", "stt_server:app", "--host", "0.0.0.0", "--port", "5001", "--log-level", "debug"]
+
 
