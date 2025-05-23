@@ -2,19 +2,19 @@
 
 services:
   # Speech-to-Text (STT) Service
-  stt_vosk:
-    container_name: stt_service
-    build:
-      context: ./stt
-      dockerfile: Dockerfile
-    ports:
-      - "5002:5001"
-    volumes:
-      - ./stt/models:/app/models
-    networks:
-      - elderly_care_network
-    environment:
-      - STT_MODEL_PATH=/app/models/vosk-model-en
+  # stt_vosk:
+  #   container_name: stt_service
+  #   build:
+  #     context: ./stt
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "5002:5001"
+  #   volumes:
+  #     - ./stt/models:/app/models
+  #   networks:
+  #     - elderly_care_network
+  #   environment:
+  #     - STT_MODEL_PATH=/app/models/vosk-model-en
   stt_fastwhisper:
     container_name: stt_fastwhisper_service
     build:
@@ -22,7 +22,7 @@ services:
       dockerfile: Dockerfile
     image: fastwhisper_stt_image
     ports:
-      - "5004:5001" # internal 5001 but external 5004 to avoid LLM service (LLM using 5001)
+      - "5004:5001"
     networks:
       - elderly_care_network
 
