@@ -2,21 +2,19 @@
 
 services:
   # Speech-to-Text (STT) Service
-  stt_vosk:
-    image: sst_image
-    container_name: stt_service
-    build:
-      context: ./stt
-      dockerfile: Dockerfile
-    ports:
-      - "5002:5002"
-    volumes:
-      - ./stt/models:/app/models
-    networks:
-      - elderly_care_network
-    environment:
-      - STT_MODEL_PATH=/app/models/vosk-model-en
-    command: python stt_server.py
+  # stt_vosk:
+  #   container_name: stt_service
+  #   build:
+  #     context: ./stt
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "5002:5001"
+  #   volumes:
+  #     - ./stt/models:/app/models
+  #   networks:
+  #     - elderly_care_network
+  #   environment:
+  #     - STT_MODEL_PATH=/app/models/vosk-model-en
   stt_fastwhisper:
     container_name: stt_fastwhisper_service
     build:
@@ -24,10 +22,9 @@ services:
       dockerfile: Dockerfile
     image: fastwhisper_stt_image
     ports:
-      - "5004:5001" # internal 5001 but external 5004 to avoid LLM service (LLM using 5001)
+      - "5004:5001"
     networks:
       - elderly_care_network
-    command: gunicorn --bind 0.0.0.0:5001 stt_server:app
 
   # Text-to-Speech (TTS) Service
   tts:
@@ -47,18 +44,15 @@ services:
 
   # Large Language Model (LLM) Service
   llm:
-    image: llm_image
-    container_name: llm_service
     build:
       context: ./llm
-      dockerfile: Dockerfile
+    image: llm_image
+    container_name: llm_service
     ports:
       - "5001:5001"
     networks:
       - elderly_care_network
-    environment:
-      - OLLAMA_URL=http://ollama:11434/api/generate
-    command: python llm_server.py
+    command: uvicorn llm_server:app --host 0.0.0.0 --port 5001 --log-level debug
 
   # Ollama Service
   ollama:

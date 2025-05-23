@@ -1,4 +1,5 @@
 pydub
 vosk
-flask
-gunicorn
+fastapi
+python-multipart
+uvicorn

@@ -1,42 +1,44 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI
+
+from fastapi.responses import JSONResponse
+from fastapi import File, UploadFile
 import os
 import wave
 import tempfile
 import logging
 from faster_whisper import WhisperModel
 
-app = Flask(__name__)
+app = FastAPI()
 logging.basicConfig(level=logging.DEBUG)
 
-# Load Whisper model (use 'base' or 'small' for lower resource use)
 model = WhisperModel("base.en", compute_type="int8")
 
 
-@app.route("/health", methods=["GET"])
-def health():
-    return "OK", 200
+@app.get("/health")
+async def health():
+    return "OK"
 
 
-@app.route("/transcribe", methods=["POST"])
-def transcribe_audio():
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
     try:
-        audio_file = request.files["audio"]
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as wav_temp:
             input_pcm_path = wav_temp.name
+            content = await audio.read()  # 🔑 Read bytes from the file
             with wave.open(input_pcm_path, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(16000)
-                wf.writeframes(audio_file.read())
+                wf.writeframes(content)
 
+        # Transcribe
         segments, _ = model.transcribe(input_pcm_path)
-
         text = " ".join([seg.text.strip() for seg in segments])
         logging.debug(f"Fast Whisper STT result: {text}")
 
         os.remove(input_pcm_path)
-        return jsonify({"text": text})
+        return JSONResponse(content={"text": text})
 
     except Exception as e:
         logging.error(f"Fast Whisper STT Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return JSONResponse(content={"error": str(e)}, status_code=500)

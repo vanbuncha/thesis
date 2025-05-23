@@ -1,36 +1,53 @@
-from flask import Flask, request, jsonify
 import os
 import logging
 import wave
+from functools import lru_cache
+from fastapi import FastAPI
+
+from fastapi.responses import JSONResponse
+from fastapi import File, UploadFile
 from vosk import Model, KaldiRecognizer
 
-app = Flask(__name__)
-model = Model("models/vosk-model-small-en-us-0.15")
+app = FastAPI()
+
+# Load model
+# -------------------------------
 
 
-@app.route("/health", methods=["GET"])
-def health():
-    return "OK", 200
+@lru_cache()
+def get_model():
+    return Model("models/vosk-model-small-en-us-0.15")
 
 
-@app.route("/transcribe", methods=["POST"])
-def transcribe_audio():
+# -------------------------------
+
+
+@app.get("/health")
+async def health():
+    return "OK"
+
+
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
     input_pcm_path = "temp_input.raw"
     output_wav_path = "temp_output.wav"
 
     try:
-        audio_file = request.files["audio"]
-        audio_file.save(input_pcm_path)
+        with open(input_pcm_path, "wb") as f:
+            f.write(await audio.read())
+
         file_size = os.path.getsize(input_pcm_path)
         logging.debug(f"Saved input audio as {input_pcm_path} ({file_size} bytes)")
 
         if file_size < 1000:
             logging.error("Audio file too small or empty.")
-            return jsonify({"error": "Audio file is empty or corrupted"}), 400
+            return JSONResponse(
+                content={"error": "Audio file is empty or corrupted"}, status_code=400
+            )
 
         with wave.open(output_wav_path, "wb") as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(2)  # 16-bit PCM = 2 bytes
+            wf.setsampwidth(2)
             wf.setframerate(16000)
             with open(input_pcm_path, "rb") as pcm:
                 wf.writeframes(pcm.read())
@@ -42,11 +59,12 @@ def transcribe_audio():
             or wf.getframerate() not in [8000, 16000]
         ):
             logging.error("Invalid WAV format")
-            return jsonify(
-                {"error": "WAV must be mono PCM, 16-bit, 8kHz or 16kHz"}
-            ), 400
+            return JSONResponse(
+                content={"error": "WAV must be mono PCM, 16-bit, 8kHz or 16kHz"},
+                status_code=400,
+            )
 
-        rec = KaldiRecognizer(model, wf.getframerate())
+        rec = KaldiRecognizer(get_model(), wf.getframerate())
         result_text = ""
 
         while True:
@@ -60,17 +78,13 @@ def transcribe_audio():
         logging.debug("Final STT result: %s", result_text)
         wf.close()
 
-        return jsonify({"text": result_text})
+        return JSONResponse(content={"text": result_text})
 
     except Exception as e:
         logging.error(f"STT Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
     finally:
         for path in [input_pcm_path, output_wav_path]:
             if os.path.exists(path):
                 os.remove(path)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002, debug=True)
