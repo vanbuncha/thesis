@@ -1,11 +1,12 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from fastapi import File, UploadFile
 import os
 import logging
 import wave
-from vosk import Model, KaldiRecognizer
 from functools import lru_cache
+from fastapi import FastAPI
+
+from fastapi.responses import JSONResponse
+from fastapi import File, UploadFile
+from vosk import Model, KaldiRecognizer
 
 app = FastAPI()
 
