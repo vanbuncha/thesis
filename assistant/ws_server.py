@@ -5,8 +5,12 @@ import aiohttp
 from fastapi import FastAPI, WebSocket
 from fastapi import APIRouter
 from fastapi.staticfiles import StaticFiles
+from aiohttp import ClientTimeout
 
 import asyncio
+
+timeout = ClientTimeout(total=2)
+
 
 STT_URL = "http://stt_vosk:5002/transcribe"
 # STT_URL = "http://stt_fastwhisper:5001/transcribe"
@@ -15,7 +19,7 @@ TTS_URL = "http://tts:5003/synthesize"
 
 
 services = {
-    "STT (Vosk)": "http://stt_vosk:5001/health",
+    # "STT (Vosk)": "http://stt_vosk:5002/health",
     "STT (FastWhisper)": "http://stt_fastwhisper:5001/health",
     "LLM": "http://llm:5001/health",
     "TTS": "http://tts:5003/health",
@@ -44,23 +48,25 @@ async def health_check():
                         payload.add_field(
                             "audio", b"", filename="dummy.wav", content_type="audio/wav"
                         )
-                        async with session.post(url, data=payload, timeout=2) as resp:
+                        async with session.post(
+                            url, data=payload, timeout=timeout
+                        ) as resp:
                             results[name] = resp.status in (
                                 200,
                                 400,
                             )  # Accept 400 for empty input
                     elif "/generate" in url:
                         async with session.post(
-                            url, json={"prompt": ""}, timeout=2
+                            url, json={"prompt": ""}, timeout=timeout
                         ) as resp:
                             results[name] = resp.status in (200, 400)
                     elif "/synthesize" in url:
                         async with session.post(
-                            url, json={"text": ""}, timeout=2
+                            url, json={"text": ""}, timeout=timeout
                         ) as resp:
                             results[name] = resp.status in (200, 400)
                     else:
-                        async with session.get(url, timeout=2) as resp:
+                        async with session.get(url, timeout=timeout) as resp:
                             results[name] = resp.status == 200
                 except Exception:
                     results[name] = False
