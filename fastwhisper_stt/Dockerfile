@@ -11,12 +11,9 @@ RUN apt-get update && apt-get install -y \
 # Workdir
 WORKDIR /app
 
-# Copy requirements
 COPY requirements.txt .
-
-# Install Python packages
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy rest of app
 COPY . .
@@ -25,5 +22,5 @@ COPY . .
 EXPOSE 5001
 
 # Run STT server
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "stt_server:app"]
+CMD ["uvicorn", "stt_server:app", "--host", "0.0.0.0", "--port", "5001", "--log-level", "debug"]
 
