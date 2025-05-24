@@ -1,12 +1,11 @@
 import asyncio
 import websockets
 import sounddevice as sd
-import numpy as np
 import simpleaudio as sa
 import wave
 import tempfile
 
-WS_URL = "ws://localhost:8000/ws/audio"  # Replace with your server's IP if remote
+WS_URL = "ws://localhost:8000/ws/audio"
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_DURATION = 0.5  # seconds
@@ -56,5 +55,30 @@ async def stream_audio():
         play_audio_bytes(response_audio)
 
 
+async def stream_audio_from_file(file_path):
+    async with websockets.connect(WS_URL, max_size=2_000_000) as websocket:
+        print(f"📁 Sending audio from file: {file_path}")
+
+        with wave.open(file_path, "rb") as wf:
+            while True:
+                frames = wf.readframes(CHUNK_SIZE)
+                if not frames:
+                    break
+                await websocket.send(frames)
+
+        await websocket.send(b"\x00")  # end of stream signal
+        print("📤 Audio sent. Waiting for response...")
+
+        response_audio = await websocket.recv()
+        print(
+            f"🔊 Playing response...\n🔍 Received {len(response_audio)} bytes from server"
+        )
+        play_audio_bytes(response_audio)
+
+
+#     asyncio.run(stream_audio())
+
 if __name__ == "__main__":
-    asyncio.run(stream_audio())
+    test_wav = "voice.wav"
+    #     asyncio.run(stream_audio())
+    asyncio.run(stream_audio_from_file(test_wav))

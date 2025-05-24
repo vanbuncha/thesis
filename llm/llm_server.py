@@ -3,6 +3,11 @@ from fastapi.responses import JSONResponse
 import requests
 import json
 import logging
+import logging
+
+logging.basicConfig(level=logging.DEBUG)  # 👈 Add this line
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI()
 
@@ -14,46 +19,46 @@ OLLAMA_URL = "http://ollama:11434/api/generate"  # Ollama API
 
 @app.get("/health")
 async def health():
-    return "OK"
+    try:
+        # Warm-up call with a minimal prompt
+        resp = requests.post(
+            "http://ollama:11434/api/generate",
+            json={"model": "mistral", "prompt": "Hello", "stream": False},
+            timeout=60,
+        )
+
+        if resp.status_code == 200:
+            payload = resp.json()
+            if payload.get("response"):
+                return "OK"
+        return JSONResponse({"error": "LLM not ready"}, status_code=500)
+    except Exception as e:
+        logging.warning(f"LLM warmup failed in healthcheck: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/generate")
 async def generate(request: Request):
     try:
-        raw_data = await request.body()
-        raw_text = raw_data.decode("utf-8")
-        logger.debug("Raw Data Received: %s", raw_text)
-
-        json_data = json.loads(raw_text)
-        logger.debug("Parsed JSON Data: %s", json_data)
-
-        user_input = json_data.get("prompt", "")
+        data = await request.json()
+        prompt = data.get("prompt", "")
+        logger.debug(f"Incoming prompt: {prompt}")
 
         response = requests.post(
             OLLAMA_URL,
-            json={"model": "mistral", "prompt": user_input, "stream": True},
-            stream=True,
+            json={"model": "mistral", "prompt": prompt, "stream": False},
+            timeout=60,
         )
 
-        if response.status_code == 200:
-            full_response = ""
+        logger.debug(f"Ollama status: {response.status_code}")
+        logger.debug(f"Ollama raw text: {response.text}")
 
-            for chunk in response.iter_lines():
-                if chunk:
-                    try:
-                        decoded_chunk = json.loads(chunk.decode("utf-8"))
-                        token = decoded_chunk.get("response", "")
-                        full_response += token
-                    except json.JSONDecodeError:
-                        logger.error("Error decoding JSON chunk: %s", chunk)
-
-            return JSONResponse(content={"response": full_response})
-        else:
-            logger.error(f"Ollama error: {response.status_code} - {response.text}")
-            return JSONResponse(
-                content={"error": "Ollama API returned an error"}, status_code=500
-            )
+        # Proper parsing
+        result = response.json()
+        final = result.get("response", "")
+        logger.debug(f"Returning to assistant: {final}")
+        return JSONResponse(content={"response": final})
 
     except Exception as e:
-        logger.error("Exception: %s", str(e))
+        logger.error("Error in LLM service: %s", str(e))
         return JSONResponse(content={"error": str(e)}, status_code=500)
