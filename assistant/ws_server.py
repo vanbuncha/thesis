@@ -157,12 +157,12 @@ async def synthesize_speech(text, out_path, retries=3):
 @app.websocket("/ws/audio")
 async def websocket_audio(websocket: WebSocket):
     await websocket.accept()
-    print("🔌 WebSocket connection established")
+    print("WebSocket connection established")
 
     while True:
         try:
             with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as raw_file:
-                print(f"📥 Receiving audio chunks to {raw_file.name}")
+                print(f"Receiving audio chunks to {raw_file.name}")
 
                 while True:
                     try:
@@ -187,7 +187,7 @@ async def websocket_audio(websocket: WebSocket):
                 await websocket.send_bytes(b"")
                 continue
 
-            print("🎧 Audio received, running pipeline...")
+            print("Audio received, running pipeline...")
 
             stt_text = extract_text_from_stt(await transcribe_audio(wav_path))
             if not stt_text:

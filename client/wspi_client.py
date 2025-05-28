@@ -66,12 +66,10 @@ async def stream_audio():
             await websocket.send(audio.tobytes())
 
         await websocket.send(b"\x00")  # end of stream signal
-        print("📤 Audio sent. Waiting for response...")
+        print("Audio sent. Waiting for response...")
 
         response_audio = await websocket.recv()
-        print(
-            f"🔊 Playing response...\n🔍 Received {len(response_audio)} bytes from server"
-        )
+        print(f"Playing response...\nReceived {len(response_audio)} bytes from server")
         play_audio_bytes(response_audio)
 
 
@@ -97,7 +95,7 @@ def listen_for_wake_word():
 
                 result = porcupine.process(pcm)
                 if result >= 0:
-                    print("🔔 Wake word 'hello-friend' detected!")
+                    print("Wake word 'hello-friend' detected!")
                     return
     finally:
         porcupine.delete()
@@ -105,7 +103,7 @@ def listen_for_wake_word():
 
 async def stream_audio_from_file(file_path):
     async with websockets.connect(WS_URL, max_size=2_000_000) as websocket:
-        print(f"📁 Sending audio from file: {file_path}")
+        print(f"Sending audio from file: {file_path}")
 
         with wave.open(file_path, "rb") as wf:
             while True:
@@ -116,7 +114,7 @@ async def stream_audio_from_file(file_path):
 
         await websocket.send(b"\x00")
         response_audio = await websocket.recv()
-        print(f"🔊 Playing response...\n🔍 Received {len(response_audio)} bytes")
+        print(f"Playing response...\nReceived {len(response_audio)} bytes")
         play_audio_bytes(response_audio)
 
 

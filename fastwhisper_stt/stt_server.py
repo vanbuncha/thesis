@@ -24,7 +24,7 @@ async def transcribe_audio(audio: UploadFile = File(...)):
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as wav_temp:
             input_pcm_path = wav_temp.name
-            content = await audio.read()  # 🔑 Read bytes from the file
+            content = await audio.read()
             with wave.open(input_pcm_path, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
