@@ -2,10 +2,11 @@ import os
 import json
 import tempfile
 import aiohttp
+import time
+import wave
 from fastapi import FastAPI, WebSocket
 from fastapi import APIRouter
 from fastapi.staticfiles import StaticFiles
-import time
 
 from aiohttp import ClientTimeout
 
@@ -81,6 +82,20 @@ async def health_check():
 # -------- HEALTHCHECK ------------
 
 
+def save_as_wav(raw_path, sample_rate=16000, channels=1):
+    with open(raw_path, "rb") as pcm_file:
+        raw_data = pcm_file.read()
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_file:
+        with wave.open(wav_file.name, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(raw_data)
+
+        return wav_file.name
+
+
 def extract_text_from_stt(stt_raw):
     try:
         data = json.loads(stt_raw)
@@ -104,35 +119,39 @@ async def transcribe_audio(audio_file_path):
     raise RuntimeError("Failed to connect to STT after several retries.")
 
 
-async def generate_response(prompt):
-    async with aiohttp.ClientSession() as session:
-        async with session.post(LLM_URL, json={"prompt": prompt}) as resp:
-            print(f"LLM status: {resp.status}")
-            text = await resp.text()
-            print(f"LLM raw response text: {text}")
-            try:
-                result = json.loads(text)
-            except Exception as e:
-                print(f"❌ JSON decode failed: {e}")
-                result = {}
-            return result.get("response", "")
+async def generate_response(prompt, retries=3):
+    for attempt in range(retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(LLM_URL, json={"prompt": prompt}) as resp:
+                    text = await resp.text()
+                    result = json.loads(text)
+                    return result.get("response", "")
+        except Exception as e:
+            print(f"⚠️ LLM retry {attempt + 1}: {e}")
+            await asyncio.sleep(2)
+    return ""
 
 
-async def synthesize_speech(text, out_path):
+async def synthesize_speech(text, out_path, retries=3):
     if not text.strip():
-        print("❌ Empty or invalid text for TTS, skipping synthesis.")
-        return
+        print("❌ Empty or invalid text for TTS.")
+        return False
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(TTS_URL, json={"text": text}) as resp:
-            print(f"TTS status: {resp.status}")
-            if resp.status != 200:
-                error = await resp.text()
-                raise RuntimeError(f"TTS failed: {resp.status} — {error}")
-            audio = await resp.read()
-            print(f"TTS audio length: {len(audio)} bytes")
-            with open(out_path, "wb") as f:
-                f.write(audio)
+    for attempt in range(retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(TTS_URL, json={"text": text}) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"TTS failed: {await resp.text()}")
+                    audio = await resp.read()
+                    with open(out_path, "wb") as f:
+                        f.write(audio)
+                    return True
+        except Exception as e:
+            print(f"⚠️ TTS retry {attempt + 1}: {e}")
+            await asyncio.sleep(2)
+    return False
 
 
 @app.websocket("/ws/audio")
@@ -140,53 +159,60 @@ async def websocket_audio(websocket: WebSocket):
     await websocket.accept()
     print("🔌 WebSocket connection established")
 
-    start_total = time.perf_counter()
+    while True:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as raw_file:
+                print(f"📥 Receiving audio chunks to {raw_file.name}")
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
-        print(f"📥 Receiving audio chunks to {tmp_audio.name}")
-        while True:
-            data = await websocket.receive_bytes()
-            if data == b"\x00":
-                print("🛑 End of stream signal received.")
-                break
-            tmp_audio.write(data)
-        tmp_audio.flush()
+                while True:
+                    try:
+                        data = await asyncio.wait_for(
+                            websocket.receive_bytes(), timeout=5
+                        )
+                    except asyncio.TimeoutError:
+                        print("Timeout: no data received. Returning to wake mode.")
+                        return  # or `continue` to keep socket open for next command
 
-    print("🎧 Audio received, running pipeline...")
+                    if data == b"\x00":
+                        print("🛑 End of stream signal received.")
+                        break
+                    raw_file.write(data)
 
-    # Time STT
-    stt_start = time.perf_counter()
-    stt_result = await transcribe_audio(tmp_audio.name)
-    stt_duration = time.perf_counter() - stt_start
-    print(f"⏱️ STT took {stt_duration:.2f} seconds")
+                raw_file.flush()
 
-    prompt = extract_text_from_stt(stt_result)
+            wav_path = save_as_wav(raw_file.name)
 
-    # Time LLM
-    llm_start = time.perf_counter()
-    reply = await generate_response(prompt)
-    llm_duration = time.perf_counter() - llm_start
-    print(f"⏱️ LLM took {llm_duration:.2f} seconds")
+            if os.path.getsize(wav_path) < 32000:  # ~1 sec at 16kHz mono 16-bit
+                print("Audio too short. Skipping.")
+                await websocket.send_bytes(b"")
+                continue
 
-    # Time TTS
-    tts_start = time.perf_counter()
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tts_audio:
-        print(f"📝 Synthesizing reply: {reply}")
-        await synthesize_speech(reply, tts_audio.name)
-        tts_duration = time.perf_counter() - tts_start
-        print(f"⏱️ TTS took {tts_duration:.2f} seconds")
+            print("🎧 Audio received, running pipeline...")
 
-        if not os.path.exists(tts_audio.name) or os.path.getsize(tts_audio.name) < 1000:
-            print("❌ TTS output is empty or too small — skipping send.")
-            await websocket.send_bytes(b"")
-            return
+            stt_text = extract_text_from_stt(await transcribe_audio(wav_path))
+            if not stt_text:
+                print("❌ STT returned empty text.")
+                await websocket.send_bytes(b"")
+                continue
 
-        print(f"📤 Sending audio response: {tts_audio.name}")
-        with open(tts_audio.name, "rb") as f:
-            await websocket.send_bytes(f.read())
+            print(f"Transcription: {stt_text}")
+            reply = await generate_response(stt_text)
+            if not reply:
+                print("❌ LLM returned empty response.")
+                await websocket.send_bytes(b"")
+                continue
 
-    total_duration = time.perf_counter() - start_total
-    print(f"✅ Pipeline finished in {total_duration:.2f} seconds")
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tts_out:
+                if await synthesize_speech(reply, tts_out.name):
+                    with open(tts_out.name, "rb") as f:
+                        await websocket.send_bytes(f.read())
+                else:
+                    await websocket.send_bytes(b"")
+                    print("❌ Failed to synthesize response.")
+        except Exception as e:
+            print(f"❌ Fatal error: {e}")
+            break
+
     await websocket.close()
 
 

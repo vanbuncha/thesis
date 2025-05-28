@@ -1,8 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import requests
-import json
-import logging
 import logging
 
 logging.basicConfig(level=logging.DEBUG)  # 👈 Add this line
