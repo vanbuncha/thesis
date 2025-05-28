@@ -1,7 +1,6 @@
 import asyncio
 import websockets
 import sounddevice as sd
-import simpleaudio as sa
 import wave
 import tempfile
 import pvporcupine
@@ -9,7 +8,6 @@ import numpy as np
 import os
 from dotenv import load_dotenv
 from pathlib import Path
-
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -20,8 +18,7 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_DURATION = 0.5  # seconds
 CHUNK_SIZE = int(SAMPLE_RATE * CHUNK_DURATION)
-
-# Path to your wake word file
+ACTIVE_TIMEOUT = 60  # seconds
 WAKE_WORD_PATH = "hello-friend.ppn"
 
 
@@ -56,7 +53,7 @@ def play_audio_bytes(audio_bytes):
 
 async def stream_audio():
     async with websockets.connect(WS_URL, max_size=10_000_000) as websocket:
-        print("🎙️ Recording... Speak now.")
+        print("Recording...")
 
         for _ in range(6):  # ~3 seconds of audio
             audio = sd.rec(
@@ -74,7 +71,7 @@ async def stream_audio():
 
 
 def listen_for_wake_word():
-    print("🎤 Passive mode: Listening for wake word...")
+    print("Passive mode: Listening for wake word...")
 
     porcupine = pvporcupine.create(
         access_key=PORCUPINE_ACCESS_KEY, keyword_paths=[WAKE_WORD_PATH]
@@ -88,9 +85,7 @@ def listen_for_wake_word():
             channels=1,
         ) as stream:
             while True:
-                raw_pcm = stream.read(porcupine.frame_length)[
-                    0
-                ]  # this is already bytes-like
+                raw_pcm = stream.read(porcupine.frame_length)[0]
                 pcm = np.frombuffer(raw_pcm, dtype=np.int16).tolist()
 
                 result = porcupine.process(pcm)
@@ -101,28 +96,28 @@ def listen_for_wake_word():
         porcupine.delete()
 
 
-async def stream_audio_from_file(file_path):
-    async with websockets.connect(WS_URL, max_size=2_000_000) as websocket:
-        print(f"Sending audio from file: {file_path}")
+async def await_active_conversation():
+    """
+    Allow conversation flow without needing wake word again.
+    Will timeout after 60s of inactivity.
+    """
+    print("Entering active conversation mode. Speak freely...")
+    last_interaction = asyncio.get_event_loop().time()
 
-        with wave.open(file_path, "rb") as wf:
-            while True:
-                frames = wf.readframes(CHUNK_SIZE)
-                if not frames:
-                    break
-                await websocket.send(frames)
+    while True:
+        await stream_audio()
+        last_interaction = asyncio.get_event_loop().time()
 
-        await websocket.send(b"\x00")
-        response_audio = await websocket.recv()
-        print(f"Playing response...\nReceived {len(response_audio)} bytes")
-        play_audio_bytes(response_audio)
+        now = asyncio.get_event_loop().time()
+        if now - last_interaction > ACTIVE_TIMEOUT:
+            print("No activity detected. Returning to passive mode.")
+            break
 
 
 async def main():
     while True:
         listen_for_wake_word()
-        # await stream_audio_from_file("voice.wav")
-        await stream_audio()
+        await await_active_conversation()
 
 
 if __name__ == "__main__":

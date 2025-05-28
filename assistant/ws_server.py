@@ -159,60 +159,61 @@ async def websocket_audio(websocket: WebSocket):
     await websocket.accept()
     print("WebSocket connection established")
 
-    while True:
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as raw_file:
-                print(f"Receiving audio chunks to {raw_file.name}")
+    start_total = time.perf_counter()
 
-                while True:
-                    try:
-                        data = await asyncio.wait_for(
-                            websocket.receive_bytes(), timeout=5
-                        )
-                    except asyncio.TimeoutError:
-                        print("Timeout: no data received. Returning to wake mode.")
-                        return  # or `continue` to keep socket open for next command
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
+        print(f"Receiving audio chunks to {tmp_audio.name}")
+        while True:
+            data = await websocket.receive_bytes()
+            if data == b"\x00":
+                print("🛑 End of stream signal received.")
+                break
+            tmp_audio.write(data)
+        tmp_audio.flush()
 
-                    if data == b"\x00":
-                        print("🛑 End of stream signal received.")
-                        break
-                    raw_file.write(data)
+    print("Audio received, running pipeline...")
 
-                raw_file.flush()
+    # Time STT
+    stt_start = time.perf_counter()
+    stt_result = await transcribe_audio(tmp_audio.name)
+    stt_duration = time.perf_counter() - stt_start
+    print(f"STT took {stt_duration:.2f} seconds")
 
-            wav_path = save_as_wav(raw_file.name)
+    prompt = extract_text_from_stt(stt_result)
 
-            if os.path.getsize(wav_path) < 32000:  # ~1 sec at 16kHz mono 16-bit
-                print("Audio too short. Skipping.")
-                await websocket.send_bytes(b"")
-                continue
+    # Filter out empty or short prompts
+    if not prompt or len(prompt.strip()) < 5:
+        print(f"⚠️ Ignored short or empty prompt: '{prompt}'")
+        await websocket.send_bytes(b"")  # Send empty response to client
+        await websocket.close()
+        return
 
-            print("Audio received, running pipeline...")
+    # Time LLM
+    llm_start = time.perf_counter()
+    reply = await generate_response(prompt)
+    llm_duration = time.perf_counter() - llm_start
+    print(f"LLM took {llm_duration:.2f} seconds")
 
-            stt_text = extract_text_from_stt(await transcribe_audio(wav_path))
-            if not stt_text:
-                print("❌ STT returned empty text.")
-                await websocket.send_bytes(b"")
-                continue
+    # Time TTS
+    tts_start = time.perf_counter()
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tts_audio:
+        print(f"Synthesizing reply: {reply}")
+        await synthesize_speech(reply, tts_audio.name)
+        tts_duration = time.perf_counter() - tts_start
+        print(f"TTS took {tts_duration:.2f} seconds")
 
-            print(f"Transcription: {stt_text}")
-            reply = await generate_response(stt_text)
-            if not reply:
-                print("❌ LLM returned empty response.")
-                await websocket.send_bytes(b"")
-                continue
+        if not os.path.exists(tts_audio.name) or os.path.getsize(tts_audio.name) < 1000:
+            print("❌ TTS output is empty or too small — skipping send.")
+            await websocket.send_bytes(b"")
+            await websocket.close()
+            return
 
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tts_out:
-                if await synthesize_speech(reply, tts_out.name):
-                    with open(tts_out.name, "rb") as f:
-                        await websocket.send_bytes(f.read())
-                else:
-                    await websocket.send_bytes(b"")
-                    print("❌ Failed to synthesize response.")
-        except Exception as e:
-            print(f"❌ Fatal error: {e}")
-            break
+        print(f"Sending audio response: {tts_audio.name}")
+        with open(tts_audio.name, "rb") as f:
+            await websocket.send_bytes(f.read())
 
+    total_duration = time.perf_counter() - start_total
+    print(f"✅ Pipeline finished in {total_duration:.2f} seconds")
     await websocket.close()
 
 
