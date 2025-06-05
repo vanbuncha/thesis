@@ -13,7 +13,9 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY")
 
-WS_URL = "ws://localhost:8000/ws/audio"
+BASE_WS_URL = "ws://localhost:8000/ws/audio"
+user_identifier = "pi-1234"
+uri = f"{BASE_WS_URL}?user={user_identifier}"
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_DURATION = 0.5  # seconds
@@ -52,7 +54,7 @@ def play_audio_bytes(audio_bytes):
 
 
 async def stream_audio():
-    async with websockets.connect(WS_URL, max_size=10_000_000) as websocket:
+    async with websockets.connect(uri, max_size=10_000_000) as websocket:
         print("Recording...")
 
         for _ in range(6):  # ~3 seconds of audio
@@ -71,7 +73,7 @@ async def stream_audio():
 
 
 async def stream_audio_from_file(file_path):
-    async with websockets.connect(WS_URL, max_size=2_000_000) as websocket:
+    async with websockets.connect(uri, max_size=2_000_000) as websocket:
         print(f"🔊 Sending audio from file: {file_path}")
 
         with wave.open(file_path, "rb") as wf:
@@ -140,6 +142,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    test_file = "voice.wav"  # or your path
+    test_file = "voice.wav"
     asyncio.run(stream_audio_from_file(test_file))
     # asyncio.run(main())

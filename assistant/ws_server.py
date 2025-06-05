@@ -4,20 +4,26 @@ import tempfile
 import aiohttp
 import time
 import wave
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Depends
 from fastapi import APIRouter
 from fastapi.staticfiles import StaticFiles
+from db.models import User, Session as DBSessionModel, Interaction
+from db.database import get_db, SessionLocal
+
 
 from aiohttp import ClientTimeout
+from db.models import Session as SessionModel
+from sqlalchemy.orm import Session
+
 
 import asyncio
 
 timeout = ClientTimeout(total=2)
 
 
-STT_URL = os.getenv("STT_URL")
-LLM_URL = os.getenv("LLM_URL")
-TTS_URL = os.getenv("TTS_URL")
+STT_URL = os.getenv("STT_URL", "")
+LLM_URL = os.getenv("LLM_URL", "")
+TTS_URL = os.getenv("TTS_URL", "")
 
 services = {
     "STT (FastWhisper)": os.getenv("SERVICE_STT", ""),
@@ -77,6 +83,30 @@ async def health_check():
 
 
 # -------- HEALTHCHECK ------------
+
+
+# -------- Database ------------
+async def get_or_create_user_and_session(user_identifier="anonymous"):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(identifier=user_identifier).first()
+        if not user:
+            user = User(identifier=user_identifier)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        session = DBSessionModel(user_id=user.id)
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+        return user, session
+    finally:
+        db.close()
+
+
+# -------- Database ------------
 
 
 def save_as_wav(raw_path, sample_rate=16000, channels=1):
@@ -152,10 +182,26 @@ async def synthesize_speech(text, out_path, retries=3):
 
 
 @app.websocket("/ws/audio")
-async def websocket_audio(websocket: WebSocket):
+async def websocket_audio(websocket: WebSocket, db: Session = Depends(get_db)):
     await websocket.accept()
-    print("WebSocket connection established")
 
+    # 1. Get user identifier from query
+    user_identifier = websocket.query_params.get("user", "anonymous")
+
+    # 2. Get or create user
+    user = db.query(User).filter_by(identifier=user_identifier).first()
+    if not user:
+        user = User(identifier=user_identifier)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    print(user)
+
+    # 3. Start session
+    session_entry = SessionModel(user_id=user.id)
+    db.add(session_entry)
+    db.commit()
+    db.refresh(session_entry)
     start_total = time.perf_counter()
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
@@ -190,6 +236,18 @@ async def websocket_audio(websocket: WebSocket):
     reply = await generate_response(prompt)
     llm_duration = time.perf_counter() - llm_start
     print(f"LLM took {llm_duration:.2f} seconds")
+
+    # Log to PostgreSQL
+    try:
+        interaction = Interaction(
+            session_id=session_entry.id,
+            user_input=prompt,
+            llm_response=reply,
+        )
+        db.add(interaction)
+        db.commit()
+    except Exception as e:
+        print(f"❌ DB logging failed: {e}")
 
     # Time TTS
     tts_start = time.perf_counter()
