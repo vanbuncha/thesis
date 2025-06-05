@@ -70,6 +70,25 @@ async def stream_audio():
         play_audio_bytes(response_audio)
 
 
+async def stream_audio_from_file(file_path):
+    async with websockets.connect(WS_URL, max_size=2_000_000) as websocket:
+        print(f"🔊 Sending audio from file: {file_path}")
+
+        with wave.open(file_path, "rb") as wf:
+            while True:
+                frames = wf.readframes(CHUNK_SIZE)
+                if not frames:
+                    break
+                await websocket.send(frames)
+
+        await websocket.send(b"\x00")  # Signal end of stream
+        print("Audio sent. Waiting for response...")
+
+        response_audio = await websocket.recv()
+        print(f"Playing response... Received {len(response_audio)} bytes")
+        play_audio_bytes(response_audio)
+
+
 def listen_for_wake_word():
     print("Passive mode: Listening for wake word...")
 
@@ -121,4 +140,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    test_file = "voice.wav"  # or your path
+    asyncio.run(stream_audio_from_file(test_file))
+    # asyncio.run(main())

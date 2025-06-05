@@ -87,12 +87,19 @@ services:
     networks:
       - elderly_care_network
     depends_on:
-      # choose one stt
-      # - stt_vosk
       - stt_fastwhisper
       - llm
       - tts
     command: uvicorn ws_server:app --host 0.0.0.0 --port 8000
+    environment:
+      STT_URL: ${STT_URL}
+      LLM_URL: ${LLM_URL}
+      TTS_URL: ${TTS_URL}
+      SERVICE_STT: ${SERVICE_STT}
+      SERVICE_LLM: ${SERVICE_LLM}
+      SERVICE_TTS: ${SERVICE_TTS}
+      SERVICE_OLLAMA: ${SERVICE_OLLAMA}
+      SERVICE_DATABASE: ${SERVICE_DATABASE}
 
 # Docker Network
 networks:
