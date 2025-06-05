@@ -15,19 +15,16 @@ import asyncio
 timeout = ClientTimeout(total=2)
 
 
-# STT_URL = "http://stt_vosk:5002/transcribe"
-STT_URL = "http://stt_fastwhisper:5001/transcribe"
-LLM_URL = "http://llm:5001/generate"
-TTS_URL = "http://tts:5003/synthesize"
-
+STT_URL = os.getenv("STT_URL")
+LLM_URL = os.getenv("LLM_URL")
+TTS_URL = os.getenv("TTS_URL")
 
 services = {
-    # "STT (Vosk)": "http://stt_vosk:5002/health",
-    "STT (FastWhisper)": "http://stt_fastwhisper:5001/health",
-    "LLM": "http://llm:5001/health",
-    "TTS": "http://tts:5003/health",
-    "Ollama": "http://ollama:11434/",
-    "Database": "http://database:5432/",
+    "STT (FastWhisper)": os.getenv("SERVICE_STT", ""),
+    "LLM": os.getenv("SERVICE_LLM", ""),
+    "TTS": os.getenv("SERVICE_TTS", ""),
+    "Ollama": os.getenv("SERVICE_OLLAMA", ""),
+    "Database": os.getenv("SERVICE_DATABASE", ""),
 }
 
 app = FastAPI()
