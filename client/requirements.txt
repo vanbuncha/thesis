@@ -31,3 +31,4 @@ unpaddedbase64==2.1.0
 yarl==1.20.0
 pvporcupine
 python-dotenv
+websockets

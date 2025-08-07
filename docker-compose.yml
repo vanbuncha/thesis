@@ -26,13 +26,28 @@ services:
     networks:
       - elderly_care_network
 
-  # Text-to-Speech (TTS) Service
+  # Text-to-Speech (TTS) Service ARM64
+  # tts:
+  #   build:
+  #     context: ./tts
+  #     dockerfile: Dockerfile
+  #     platforms:
+  #       - linux/arm64
+  #   image: tts_image
+  #   ports:
+  #     - "5003:5003"
+  #   networks:
+  #     - elderly_care_network
+  #   environment:
+  #     - TTS_MODEL_PATH=/app/models/coqui-tts
+  #   command: python3 tts_server.py
+  # TTS Service
+
+  # AMD64
   tts:
     build:
       context: ./tts
       dockerfile: Dockerfile
-      platforms:
-        - linux/arm64
     image: tts_image
     ports:
       - "5003:5003"
@@ -48,6 +63,8 @@ services:
       context: ./llm
     image: llm_image
     container_name: llm_service
+    environment:
+      - OLLAMA_HOST=ollama:12121
     ports:
       - "5001:5001"
     networks:
@@ -60,10 +77,18 @@ services:
     container_name: ollama
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://0.0.0.0:12121
     ports:
-      - "11434:11434"
+      - "12121:12121"
     networks:
       - elderly_care_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:12121"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      timeout: 10s
 
   # Database Service (PostgreSQL)
   database:

@@ -1,15 +1,16 @@
+import os
 import torch
 from flask import Flask, request, jsonify, send_file
 from TTS.api import TTS
 import traceback
 import tempfile
 
+os.environ["TORCH_USE_CUDA"] = "0"
+os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+
 app = Flask(__name__)
 
-# Detect if GPU is available
-use_gpu = torch.backends.mps.is_available()
-
-# Load Coqui TTS model with GPU acceleration
 tts = TTS(
     model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False
 )
@@ -33,7 +34,10 @@ def text_to_speech():
             path = tmp_file.name
             tts.tts_to_file(text=text, file_path=path)
 
-        return send_file(path, mimetype="audio/wav")
+            try:
+                return send_file(path, mimetype="audio/wav")
+            finally:
+                os.remove(path)
 
     except Exception as e:
         traceback.print_exc()
