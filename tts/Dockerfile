@@ -1,4 +1,5 @@
-FROM --platform=linux/arm64 python:3.10-slim
+# FROM --platform=linux/arm64 python:3.10-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
@@ -19,6 +20,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN pip install --upgrade pip
 RUN pip install gunicorn
 
+ENV NNPACK_DISABLE=1
 
 # Copy Python dependency file
 COPY requirements.txt .
@@ -33,4 +35,3 @@ EXPOSE 5003
 
 # CMD ["python3", "tts_server.py"]
 CMD ["gunicorn", "--bind", "0.0.0.0:5003", "tts_server:app"]
-

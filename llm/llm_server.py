@@ -12,7 +12,7 @@ app = FastAPI()
 # Logging setup
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = "http://ollama:11434/api/generate"  # Ollama API
+OLLAMA_URL = "http://ollama:12121/api/generate"  # Ollama API
 
 
 @app.get("/health")
@@ -20,7 +20,7 @@ async def health():
     try:
         # Warm-up call with a minimal prompt
         resp = requests.post(
-            "http://ollama:11434/api/generate",
+            "http://ollama:12121/api/generate",
             json={"model": "mistral", "prompt": "Hello", "stream": False},
             timeout=60,
         )
