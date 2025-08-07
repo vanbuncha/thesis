@@ -1,0 +1,9 @@
+.DS_Store
+tts/models/*
+stt/models/*
+db/data/*
+.env
+.env.client
+synapse/data
+matrix/store
+parts.md
