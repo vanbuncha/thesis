@@ -49,6 +49,8 @@ services:
       context: ./tts
       dockerfile: Dockerfile
     image: tts_image
+    devices:
+      - "nvidia.com/gpu=all"
     ports:
       - "5003:5003"
     networks:

@@ -1,19 +1,21 @@
 import os
-import torch
 from flask import Flask, request, jsonify, send_file
+import torch
 from TTS.api import TTS
 import traceback
 import tempfile
 
+os.environ["NNPACK_DISABLE"] = "1"
+os.environ["ATEN_DISABLE_NNPACK"] = "1"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
 os.environ["TORCH_USE_CUDA"] = "0"
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 app = Flask(__name__)
 
-tts = TTS(
-    model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False
-)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+tts = TTS(model_name="tts_models/en/vctk/vits").to(device)
 
 
 @app.route("/health", methods=["GET"])
@@ -32,7 +34,13 @@ def text_to_speech():
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             path = tmp_file.name
-            tts.tts_to_file(text=text, file_path=path)
+            speaker = data.get("speaker", tts.speakers[0])
+            # language = data.get("language", "en")  # fallback to English
+            # tts.tts_to_file(
+            #     text=text, speaker=speaker, language=language, file_path=path
+            # )
+
+            tts.tts_to_file(text=text, speaker=speaker, file_path=path)
 
             try:
                 return send_file(path, mimetype="audio/wav")
