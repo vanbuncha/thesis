@@ -44,7 +44,7 @@ ACTIVE_TIMEOUT = 15  # seconds
 TOTAL_RECORD_SECONDS = 5.0  # total audio to send per request
 TARGET_FRAMES = int(round(TOTAL_RECORD_SECONDS / CHUNK_DURATION))  # e.g., 3.0 / 0.5 = 6
 
-# Porcupine keyword (make sure platform-appropriate .ppn is used)
+# Porcupine keyword
 WAKE_WORD_PATH = os.getenv(
     "WAKE_WORD_PATH", "hello-friend-linux.ppn"
 )  # Linux x86_64 .ppn

@@ -2,17 +2,18 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install build essentials to support uvicorn deps
-RUN apt-get update && apt-get install -y build-essential gcc libffi-dev
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential gcc curl && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy and install requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY llm/requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy app code
-COPY . .
+COPY llm/llm_server.py /app/llm_server.py
+COPY assistant/db /app/db
+ENV PYTHONPATH=/app
 
 EXPOSE 5001
-
-CMD uvicorn llm_server:app --host 0.0.0.0 --port 5001 
+CMD ["uvicorn", "llm_server:app", "--host", "0.0.0.0", "--port", "5001"]
 

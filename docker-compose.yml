@@ -1,20 +1,4 @@
-# version: "3.8"
-
 services:
-  # Speech-to-Text (STT) Service
-  # stt_vosk:
-  #   container_name: stt_service
-  #   build:
-  #     context: ./stt
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "5002:5001"
-  #   volumes:
-  #     - ./stt/models:/app/models
-  #   networks:
-  #     - elderly_care_network
-  #   environment:
-  #     - STT_MODEL_PATH=/app/models/vosk-model-en
   stt_fastwhisper:
     container_name: stt_fastwhisper_service
     build:
@@ -26,75 +10,73 @@ services:
     networks:
       - elderly_care_network
 
-  # Text-to-Speech (TTS) Service ARM64
-  # tts:
-  #   build:
-  #     context: ./tts
-  #     dockerfile: Dockerfile
-  #     platforms:
-  #       - linux/arm64
-  #   image: tts_image
-  #   ports:
-  #     - "5003:5003"
-  #   networks:
-  #     - elderly_care_network
-  #   environment:
-  #     - TTS_MODEL_PATH=/app/models/coqui-tts
-  #   command: python3 tts_server.py
-  # TTS Service
-
-  # AMD64
   tts:
     build:
       context: ./tts
       dockerfile: Dockerfile
     image: tts_image
-    devices:
-      - "nvidia.com/gpu=all"
+    container_name: tts_service
+    gpus: all
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TTS_MODEL_PATH=/app/models/coqui-tts
     ports:
       - "5003:5003"
     networks:
       - elderly_care_network
-    environment:
-      - TTS_MODEL_PATH=/app/models/coqui-tts
     command: python3 tts_server.py
 
-  # Large Language Model (LLM) Service
   llm:
     build:
-      context: ./llm
+      context: .
+      dockerfile: ./llm/Dockerfile
     image: llm_image
     container_name: llm_service
     environment:
-      - OLLAMA_HOST=ollama:12121
+      - OLLAMA_URL=http://ollama:11434/api/generate
+      - OLLAMA_MODEL=mistral
+      - DATABASE_URL=${DATABASE_URL}
     ports:
       - "5001:5001"
     networks:
       - elderly_care_network
-    command: uvicorn llm_server:app --host 0.0.0.0 --port 5001 --log-level debug
+    depends_on:
+      database:
+        condition: service_healthy
 
-  # Ollama Service
   ollama:
-    image: ollama/ollama
+    image: ollama/ollama:latest
     container_name: ollama
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=http://0.0.0.0:12121
-    ports:
-      - "12121:12121"
+    ports: ["12121:11434"]
     networks:
       - elderly_care_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:12121"]
-      interval: 30s
-      retries: 3
-      start_period: 10s
-      timeout: 10s
+    gpus: all
+    shm_size: "1g"
+    ipc: host
+    security_opt:
+      - seccomp:unconfined
+      - apparmor=unconfined
+    device_cgroup_rules:
+      - "c 195:* rmw" # NVIDIA core
+      - "c 508:* rmw" # NVIDIA UVM
+      - "c 511:* rmw" # NVIDIA caps
+    devices:
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+    volumes:
+      - ollama_data:/root/.ollama
+      - /dev/nvidia-caps:/dev/nvidia-caps
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_LLM_LIBRARY=cublas
+      - OLLAMA_NO_CPU_FALLBACK=1
+      - OLLAMA_DEBUG=debug
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+      - CUDA_VISIBLE_DEVICES=0
 
-  # Database Service (PostgreSQL)
   database:
-    image: postgres:latest
+    image: postgres:17
     container_name: elderly_care_db
     ports:
       - "5432:5432"
@@ -106,18 +88,34 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
 
   assistant:
     build: ./assistant
+    image: assistant_image
+    container_name: assistant_service
     ports:
       - "8000:8000"
     networks:
       - elderly_care_network
     depends_on:
-      - stt_fastwhisper
-      - llm
-      - tts
-    command: uvicorn ws_server:app --host 0.0.0.0 --port 8000
+      database:
+        condition: service_healthy
+      stt_fastwhisper:
+        condition: service_started
+      llm:
+        condition: service_started
+      tts:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -129,10 +127,11 @@ services:
       SERVICE_TTS: ${SERVICE_TTS}
       SERVICE_OLLAMA: ${SERVICE_OLLAMA}
       SERVICE_DATABASE: ${SERVICE_DATABASE}
+      DATABASE_URL: ${DATABASE_URL}
 
-# Docker Network
 networks:
   elderly_care_network:
     driver: bridge
+
 volumes:
   ollama_data:
