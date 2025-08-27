@@ -1,10 +1,13 @@
 import os
-from flask import Flask, request, jsonify, send_file
 import torch
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 from TTS.api import TTS
-import traceback
 import tempfile
+import traceback
 
+# Environment configuration
 os.environ["NNPACK_DISABLE"] = "1"
 os.environ["ATEN_DISABLE_NNPACK"] = "1"
 os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
@@ -12,46 +15,46 @@ os.environ["TORCH_USE_CUDA"] = "0"
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
-app = Flask(__name__)
+app = FastAPI()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 tts = TTS(model_name="tts_models/en/vctk/vits").to(device)
 
 
-@app.route("/health", methods=["GET"])
+class TTSRequest(BaseModel):
+    text: str
+    speaker: str | None = None
+
+
+@app.get("/health")
 def health():
-    return "OK", 200
+    return {"status": "OK"}
 
 
-@app.route("/synthesize", methods=["POST"])
-def text_to_speech():
+@app.post("/synthesize")
+def synthesize(request_data: TTSRequest):
+    text = request_data.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="No text provided")
+
     try:
-        data = request.json
-        text = data.get("text", "").strip()
-
-        if not text:
-            return jsonify({"error": "No text provided"}), 400
+        speaker = request_data.speaker or tts.speakers[0]
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             path = tmp_file.name
-            speaker = data.get("speaker", tts.speakers[0])
-            # language = data.get("language", "en")  # fallback to English
-            # tts.tts_to_file(
-            #     text=text, speaker=speaker, language=language, file_path=path
-            # )
 
-            tts.tts_to_file(text=text, speaker=speaker, file_path=path)
+        tts.tts_to_file(text=text, speaker=speaker, file_path=path)
 
-            try:
-                return send_file(path, mimetype="audio/wav")
-            finally:
-                os.remove(path)
+        return FileResponse(
+            path,
+            media_type="audio/wav",
+            filename="speech.wav",
+            background=lambda: os.remove(path),
+        )
 
     except Exception as e:
         traceback.print_exc()
-        app.logger.error("Exception in TTS:", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5003)
+print(">>> FastAPI TTS service is starting...")

@@ -25,7 +25,7 @@ services:
       - "5003:5003"
     networks:
       - elderly_care_network
-    command: python3 tts_server.py
+    command: uvicorn tts_server:app --host 0.0.0.0 --port 5003 --log-level debug
 
   llm:
     build:
@@ -48,24 +48,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
-    ports: ["12121:11434"]
-    networks:
-      - elderly_care_network
     gpus: all
     shm_size: "1g"
-    ipc: host
-    security_opt:
-      - seccomp:unconfined
-      - apparmor=unconfined
-    device_cgroup_rules:
-      - "c 195:* rmw" # NVIDIA core
-      - "c 508:* rmw" # NVIDIA UVM
-      - "c 511:* rmw" # NVIDIA caps
-    devices:
-      - /dev/nvidia-modeset:/dev/nvidia-modeset
-    volumes:
-      - ollama_data:/root/.ollama
-      - /dev/nvidia-caps:/dev/nvidia-caps
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_LLM_LIBRARY=cublas
@@ -73,7 +57,10 @@ services:
       - OLLAMA_DEBUG=debug
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
-      - CUDA_VISIBLE_DEVICES=0
+    ports: ["12121:11434"]
+    networks: [elderly_care_network]
+    volumes:
+      - ollama_data:/root/.ollama
 
   database:
     image: postgres:17

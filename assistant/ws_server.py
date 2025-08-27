@@ -182,7 +182,9 @@ async def transcribe_audio(audio_file_path: str) -> tuple[str, int]:
     raise RuntimeError("Failed to connect to STT after several retries.")
 
 
-async def generate_response(prompt: str, retries: int = 3) -> tuple[str, int]:
+async def generate_response(
+    prompt: str, user_identifier: str, retries: int = 3
+) -> tuple[str, int]:
     """
     Returns (llm_text, http_status). On failure returns ("", status_or_0).
     """
@@ -190,11 +192,15 @@ async def generate_response(prompt: str, retries: int = 3) -> tuple[str, int]:
         try:
             async with aiohttp.ClientSession() as session:
                 t0 = now_ms()
-                async with session.post(LLM_URL, json={"prompt": prompt}) as resp:
+                payload = {
+                    "prompt": prompt,
+                    "user": user_identifier,
+                }
+                async with session.post(LLM_URL, json=payload) as resp:
                     text_resp = await resp.text()
                     dt = now_ms() - t0
                     logger.info(
-                        f"[LLM] status={resp.status} latency={dt}ms prompt_chars={len(prompt)}"
+                        f"[LLM] status={resp.status} latency={dt}ms prompt_chars={len(prompt)} user={user_identifier}"
                     )
                     try:
                         result = json.loads(text_resp)
@@ -309,7 +315,7 @@ async def websocket_audio(websocket: WebSocket, db: DBSession = Depends(get_db))
 
     # LLM
     with Timer("stage:LLM"):
-        reply, llm_status = await generate_response(prompt)
+        reply, llm_status = await generate_response(prompt, user_identifier)
     logger.info(f"[LLM] reply chars={len(reply)} status={llm_status}")
 
     # Log interaction

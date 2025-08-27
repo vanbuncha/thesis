@@ -4,6 +4,7 @@
 import asyncio
 import os
 import math
+import time
 from collections import deque
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from sounddevice import PortAudioError
 import wave
 import tempfile
 import pvporcupine
+import torch
+from silero_vad import load_silero_vad
 
 
 # --------------------------
@@ -28,7 +31,7 @@ PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY")
 
 # WS server
 BASE_WS_URL = os.getenv("BASE_WS_URL", "ws://localhost:8000/ws/audio")
-USER_IDENTIFIER = os.getenv("USER_IDENTIFIER", "pi-1234")
+USER_IDENTIFIER = os.getenv("USER_IDENTIFIER", "pi-1235")
 URI = f"{BASE_WS_URL}?user={USER_IDENTIFIER}"
 
 # STT server expects 16k mono int16 PCM
@@ -49,10 +52,27 @@ WAKE_WORD_PATH = os.getenv(
     "WAKE_WORD_PATH", "hello-friend-linux.ppn"
 )  # Linux x86_64 .ppn
 
+# Voice activation detection parameters
+SILENCE_TIMEOUT = 1.0
+MAX_RECORD_SECONDS = 20.0
+MIN_AUDIO_LENGTH = 8000
+
+# Silero VAD model
+torch.set_num_threads(1)
+vad_model = load_silero_vad()
+
 
 # --------------------------
 # Audio helpers
 # --------------------------
+
+
+def play_beep(beep_path="beep.wav"):
+    try:
+        with open(beep_path, "rb") as f:
+            play_audio_bytes(f.read())
+    except Exception as e:
+        print(f"Failed to play beep: {e}")
 
 
 def _resample_block_linear_1d(x: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
@@ -105,7 +125,7 @@ def resample_int16_to_16k(
 def play_audio_bytes(audio_bytes: bytes) -> None:
     """Always resample to the output device's default samplerate for clean playback."""
     if not audio_bytes or len(audio_bytes) < 100:
-        print("❌ No audio received or invalid WAV format.")
+        print("No audio received or invalid WAV format.")
         return
 
     def read_wav_bytes_to_array(b: bytes):
@@ -149,7 +169,7 @@ def play_audio_bytes(audio_bytes: bytes) -> None:
         sd.play(y, samplerate=sr_out, blocking=True)
         sd.wait()
     except PortAudioError as e:
-        print(f"❌ Output device error: {e}")
+        print(f"Output device error: {e}")
 
 
 # --------------------------
@@ -158,58 +178,94 @@ def play_audio_bytes(audio_bytes: bytes) -> None:
 
 
 async def stream_audio() -> bool:
-    """Record and send audio, return True if meaningful response received."""
-    async with websockets.connect(URI, max_size=10_000_000) as websocket:
-        print("Recording...")
+    """Record and send audio using VAD, return True if meaningful response received."""
+    try:
+        play_beep()
+    except Exception as e:
+        print(f"Failed to play beep: {e}")
 
-        # Device/native input rate (often 44100 / 48000)
-        dinfo = sd.query_devices(None, "input")
-        sr_dev = int(dinfo.get("default_samplerate") or 48000)
-        sr_srv = SAMPLE_RATE  # 16000
-        frame_srv = CHUNK_SIZE  # 0.5s @ 16k = 8000
-        block_dev = max(128, int(round(frame_srv * sr_dev / sr_srv)))
+    try:
+        async with websockets.connect(URI, max_size=10_000_000) as websocket:
+            print("Recording (VAD enabled)...")
 
-        fifo = deque()
+            dinfo = sd.query_devices(None, "input")
+            sr_dev = int(dinfo.get("default_samplerate") or 48000)
+            blocksize = max(512, int(sr_dev * 0.05))
 
-        try:
+            audio_buffer = deque()
+            silence_start = None
+            start_time = time.time()
+
             with sd.RawInputStream(
                 samplerate=sr_dev,
-                blocksize=block_dev,
+                blocksize=blocksize,
                 dtype="int16",
                 channels=1,
             ) as stream:
-                sent = 0
-                while sent < TARGET_FRAMES:
-                    raw = stream.read(block_dev)[0]
-                    x_i16 = np.frombuffer(raw, dtype=np.int16)
-                    y_i16 = resample_int16_to_16k(x_i16, sr_dev, sr_srv)
-                    fifo.extend(y_i16.tolist())
+                while True:
+                    raw = stream.read(blocksize)[0]
+                    x = np.frombuffer(raw, dtype=np.int16)
+                    y = resample_int16_to_16k(x, sr_dev, SAMPLE_RATE)
 
-                    while len(fifo) >= frame_srv and sent < TARGET_FRAMES:
-                        chunk = [fifo.popleft() for _ in range(frame_srv)]
-                        await websocket.send(
-                            np.asarray(chunk, dtype=np.int16).tobytes()
-                        )
-                        sent += 1
+                    # Get VAD probability
+                    # Only pass 512 samples to the VAD model
+                    if len(y) >= 512:
+                        y_vad = y[-512:] / 32768.0
+                        y_vad = np.clip(y_vad, -1.0, 1.0).astype(np.float32)
 
-            await websocket.send(b"\x00")
-            print("Audio sent. Waiting for response...")
+                        speech_prob = vad_model(
+                            torch.from_numpy(y_vad.astype(np.float32)), SAMPLE_RATE
+                        ).item()
+                        is_speech = speech_prob > 0.3
+                        print(f"Speech prob: {speech_prob:.2f}")
+                    else:
+                        is_speech = False  # too short, assume no speech
 
+                    if is_speech:
+                        silence_start = None
+                        audio_buffer.extend(y.tolist())
+                    else:
+                        if silence_start is None:
+                            silence_start = time.time()
+                        elif time.time() - silence_start > SILENCE_TIMEOUT:
+                            print(" Silence detected, stopping recording.")
+                            break
+
+                    if time.time() - start_time > MAX_RECORD_SECONDS:
+                        print("Max recording time reached.")
+                        break
+
+            if len(audio_buffer) < MIN_AUDIO_LENGTH:
+                print(" Too little speech detected.")
+                return False
+
+            print(" Sending audio to server...")
+
+            # Send chunks in 0.5s (8000-sample) frames
+            fifo = deque(audio_buffer)
+            while len(fifo) >= CHUNK_SIZE:
+                chunk = [fifo.popleft() for _ in range(CHUNK_SIZE)]
+                await websocket.send(np.asarray(chunk, dtype=np.int16).tobytes())
+
+            await websocket.send(b"\x00")  # end of audio signal
+
+            print("Awaiting response from server...")
             response_audio = await websocket.recv()
-            print(
-                f"Playing response...\nReceived {len(response_audio)} bytes from server"
-            )
 
             if response_audio and len(response_audio) > 100:
+                print(f"Playing response ({len(response_audio)} bytes)")
                 play_audio_bytes(response_audio)
                 return True
             else:
-                print("❌ No audio received or invalid WAV format.")
+                print("No audio received or invalid WAV format.")
                 return False
 
-        except PortAudioError as e:
-            print(f"❌ Mic error: {e}")
-            return False
+    except PortAudioError as e:
+        print(f" Mic error: {e}")
+        return False
+    except Exception as e:
+        print(f" General error: {e}")
+        return False
 
 
 # --------------------------
@@ -380,5 +436,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    print(USER_IDENTIFIER)
     # asyncio.run(stream_audio_from_file("voice.wav"))
     asyncio.run(main())

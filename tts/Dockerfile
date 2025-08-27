@@ -1,43 +1,30 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM python:3.10-slim
 
-WORKDIR /app
-
-# Install Python 3.10 + pip and system dependencies
+# System dependencies
 RUN apt-get update && apt-get install -y \
-    python3.10 \
-    python3-pip \
-    python3.10-venv \
     espeak \
     ffmpeg \
-    gcc \
-    g++ \
+    libsndfile1 \
     build-essential \
+    cmake \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3 the default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
-RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
-
-# Install Rust
+# Install Rust (for TTS dependency)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Python dependencies
-RUN pip install --upgrade pip setuptools wheel
-RUN pip install gunicorn
+WORKDIR /app
 
-ENV NNPACK_DISABLE=1
-
-# Copy dependency file
+# Install Python deps
 COPY requirements.txt .
+RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy app
 COPY . .
 
-# Expose port 5003
 EXPOSE 5003
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5003", "tts_server:app"]
+CMD ["uvicorn", "tts_server:app", "--host", "0.0.0.0", "--port", "5003"]
 
