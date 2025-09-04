@@ -5,6 +5,10 @@ services:
       context: ./fastwhisper_stt
       dockerfile: Dockerfile
     image: fastwhisper_stt_image
+    gpus: all
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "5004:5001"
     networks:
@@ -115,6 +119,8 @@ services:
       SERVICE_OLLAMA: ${SERVICE_OLLAMA}
       SERVICE_DATABASE: ${SERVICE_DATABASE}
       DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - ./assistant/logs:/app/logs
 
 networks:
   elderly_care_network:

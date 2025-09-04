@@ -1,8 +1,9 @@
 import os
 import torch
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask  # <-- add this
 from TTS.api import TTS
 import tempfile
 import traceback
@@ -38,22 +39,30 @@ def synthesize(request_data: TTSRequest):
         raise HTTPException(status_code=400, detail="No text provided")
 
     try:
-        speaker = request_data.speaker or tts.speakers[0]
+        # Fallback to the first available speaker if none provided
+        speaker = request_data.speaker or (
+            tts.speakers[0] if hasattr(tts, "speakers") else None
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             path = tmp_file.name
 
         tts.tts_to_file(text=text, speaker=speaker, file_path=path)
 
+        # Use BackgroundTask so Starlette can await it
+        cleanup = BackgroundTask(os.remove, path)
         return FileResponse(
-            path,
-            media_type="audio/wav",
-            filename="speech.wav",
-            background=lambda: os.remove(path),
+            path, media_type="audio/wav", filename="speech.wav", background=cleanup
         )
 
     except Exception as e:
         traceback.print_exc()
+        # Best-effort cleanup if tts_to_file failed after creating path
+        try:
+            if "path" in locals() and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
