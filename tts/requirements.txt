@@ -1,5 +1,4 @@
-fastapi
-uvicorn[standard]
-torch
+Flask
+requests
 TTS==0.21.0
-
+torch

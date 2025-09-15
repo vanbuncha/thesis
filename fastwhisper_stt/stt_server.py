@@ -10,7 +10,8 @@ from faster_whisper import WhisperModel
 
 app = FastAPI()
 logging.basicConfig(level=logging.DEBUG)
-model = WhisperModel("medium.en", device="cuda", compute_type="int8_float16")
+
+model = WhisperModel("base.en", compute_type="int8")
 
 
 @app.get("/health")
