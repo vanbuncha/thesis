@@ -2,6 +2,7 @@
 tts/models/*
 stt/models/*
 db/data/*
+db/script.sh
 .env
 .env.client
 synapse/data
