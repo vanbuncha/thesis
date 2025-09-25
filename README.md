@@ -75,6 +75,11 @@ List tables:
 ```
 \dt
 ```
-
+# Configure IP on Client
+Before starting up the client it is important to set correct server IP address:
+```bash
+hostname -I
+```
+The IP address needs to be then correctly set in .env file
 
 
