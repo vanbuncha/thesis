@@ -1,6 +1,6 @@
-# Thesis Repository – 2025
+# Welzijn.pet
 
-This repository contains the implementation for the **Social Robotics System for Senior Care using LLMs and Raspberry Pi**.
+This repository contains the implementation for the **Social Robotics System for Senior Care using LLMs and Raspberry Pi**, furthering Van Nguyen's thesis work.
 
 ---
 
